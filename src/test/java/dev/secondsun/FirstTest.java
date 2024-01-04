@@ -6,13 +6,11 @@ import java.net.URI;
 import java.util.Arrays;
 import java.util.Optional;
 
+import dev.secondsun.retro.util.CA65Scanner;
 import dev.secondsun.retro.util.FileService;
 import dev.secondsun.retro.util.ProjectService;
 import dev.secondsun.retro.util.SymbolService;
-import dev.secondsun.tm4e.core.grammar.IGrammar;
-import dev.secondsun.tm4e.core.grammar.IToken;
-import dev.secondsun.tm4e.core.grammar.ITokenizeLineResult;
-import dev.secondsun.tm4e.core.registry.Registry;
+import dev.secondsun.retro.util.Token;
 import dev.secondsun.retro.util.Util;
 import org.junit.jupiter.api.Test;
 
@@ -27,17 +25,15 @@ public class FirstTest {
      */
     @Test
     public void printTestSgs() throws Exception {
-        var registry = new Registry();
-        IGrammar grammar = registry.loadGrammarFromPathSync("snes.json",
-                Util.class.getClassLoader().getResourceAsStream("snes.json"));
+        CA65Scanner grammar = new CA65Scanner();
         
         var sgsProgram = Util.toString(Util.class.getClassLoader().getResourceAsStream("libSFX.i"));
         
         Arrays.asList(sgsProgram.split("\n")).forEach(line -> {
-            ITokenizeLineResult lineTokens = grammar.tokenizeLine(line);
+            var lineTokens = grammar.tokenizeLine(line);
             System.out.println(line);
-            for (int i = 0; i < lineTokens.getTokens().length; i++) {
-                IToken token = lineTokens.getTokens()[i];
+            for (int i = 0; i < lineTokens.size(); i++) {
+                Token token = lineTokens.get(i);
                 System.out.println("Token from " + token.getStartIndex() + " to " + token.getEndIndex() + " with scopes "
                         + token.getScopes());
             }
@@ -50,12 +46,7 @@ public class FirstTest {
         var rootUri = getTestDirURI();
         var fileService = new FileService();
 
-        var registry = new Registry();
-
-        var grammar = registry.loadGrammarFromPathSync("snes.json",
-                Util.class.getClassLoader().getResourceAsStream("snes.json"));
-
-        var symbolService = new SymbolService(registry, grammar);
+        var symbolService = new SymbolService();
         var projectService = new ProjectService(fileService, symbolService);
         projectService.includeDir(rootUri);
 

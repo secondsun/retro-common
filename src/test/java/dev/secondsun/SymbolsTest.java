@@ -12,7 +12,8 @@ import java.util.Arrays;
 import dev.secondsun.retro.util.Util;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
-import dev.secondsun.tm4e.core.registry.Registry;
+
+import dev.secondsun.retro.util.CA65Scanner;
 import dev.secondsun.retro.util.FileService;
 import dev.secondsun.retro.util.SymbolService;
 import dev.secondsun.retro.util.Location;
@@ -86,9 +87,8 @@ public class SymbolsTest {
  */
 public void printLines() throws Exception {
     var fileService = new FileService();
-    var registry = new Registry();
-    var grammar = registry.loadGrammarFromPathSync("snes.json",
-    Util.class.getClassLoader().getResourceAsStream("snes.json"));
+    var grammar = new CA65Scanner();
+    
 
         ClassLoader classLoader = getClass().getClassLoader();
         // src/test/resources/workspace1
@@ -96,9 +96,9 @@ public void printLines() throws Exception {
         fileService.addSearchPath(file.toURI());
 
         fileService.readLines(URI.create("./symbol.s")).forEach((line)->{
-        System.out.println(line);
-        Arrays.stream(grammar.tokenizeLine(line).getTokens()).map(Object::toString).forEach(System.out::println);
-     });
+            System.out.println(line);
+            grammar.tokenizeLine(line).stream().map(Object::toString).forEach(System.out::println);
+        });
 }
 
 @Test

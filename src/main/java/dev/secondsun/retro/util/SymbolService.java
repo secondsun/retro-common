@@ -1,8 +1,5 @@
 package dev.secondsun.retro.util;
 
-import dev.secondsun.tm4e.core.grammar.IGrammar;
-import dev.secondsun.tm4e.core.registry.Registry;
-
 import java.net.URI;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -11,30 +8,16 @@ import java.util.Map;
 import java.util.logging.Logger;
 import java.util.stream.IntStream;
 
+import dev.secondsun.retro.util.vo.TokenizedFile;
+
 public class SymbolService {
 
     private static final String VARIABLE_DEFINITION = "variable.other.definition";
 
     public Map<String, Location> definitions = new HashMap<>();
 
-    final Registry registry;
-    final IGrammar grammar;
-
-    public SymbolService() {
-        registry = new Registry();
-        try {
-            grammar = registry.loadGrammarFromPathSync("snes.json",
-                    SymbolService.class.getClassLoader().getResourceAsStream("snes.json"));
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    public SymbolService(Registry registry, IGrammar grammar) {
-        this.registry = registry;
-        this.grammar = grammar;
-    }
-
+    
+    final CA65Scanner grammar = new CA65Scanner();
     public void addDefinition(String name, Location location) {
         definitions.put(name, location);
     }
@@ -43,14 +26,14 @@ public class SymbolService {
         return definitions.get(name);
     }
 
-    public void extractDefinitions(URI fileName, List<String> lines) {
+    public void extractDefinitions(TokenizedFile file) {
 
-        IntStream.range(0, lines.size()).forEach((idx) -> {
+        IntStream.range(0, file.lines()).forEach((idx) -> {
 
-            String line = lines.get(idx);
+            String line = file.get(idx);
             var tokenized = grammar.tokenizeLine(line);
             // only one definition per line so find first is ok
-            var foundLabelDef = Arrays.stream(tokenized.getTokens())
+            var foundLabelDef = tokenized.stream()
                     .filter(token -> token.getScopes().contains(VARIABLE_DEFINITION)).findFirst();
 
             foundLabelDef.ifPresent(
@@ -72,7 +55,7 @@ public class SymbolService {
                 if (split.length > 1) {
 
                     var namePlusRight = split[1].trim();
-                    var tok = grammar.tokenizeLine(namePlusRight).getTokens()[0];
+                    var tok = grammar.tokenizeLine(namePlusRight).get(0);
                     var def = namePlusRight.subSequence(tok.getStartIndex(), tok.getEndIndex()).toString();
                     addDefinition(def,
                             new Location(fileName, idx, 0, line.length()));
@@ -83,7 +66,7 @@ public class SymbolService {
                 if (split.length > 1) {
 
                     var namePlusRight = split[1].trim();
-                    var tok = grammar.tokenizeLine(namePlusRight).getTokens()[0];
+                    var tok = grammar.tokenizeLine(namePlusRight).get(0);
                     var def = namePlusRight.subSequence(tok.getStartIndex(), tok.getEndIndex()).toString();
                     addDefinition(def,
                             new Location(fileName, idx, 0, line.length()));
@@ -94,7 +77,7 @@ public class SymbolService {
                 if (split.length > 1) {
 
                     var namePlusRight = split[1].trim();
-                    var tok = grammar.tokenizeLine(namePlusRight).getTokens()[0];
+                    var tok = grammar.tokenizeLine(namePlusRight).get(0);
                     var def = namePlusRight.subSequence(tok.getStartIndex(), tok.getEndIndex()).toString();
                     addDefinition(def,
                             new Location(fileName, idx, 0, line.length()));
@@ -106,7 +89,7 @@ public class SymbolService {
                 if (macro.length > 1) {
 
                     var namePlusRight = macro[1].trim();
-                    var tok = grammar.tokenizeLine(namePlusRight).getTokens()[0];
+                    var tok = grammar.tokenizeLine(namePlusRight).get(0);
                     var def = namePlusRight.subSequence(tok.getStartIndex(), tok.getEndIndex()).toString();
                     addDefinition(def,
                             new Location(fileName, idx, 0, line.length()));
@@ -117,14 +100,9 @@ public class SymbolService {
             {
                 var macro = line.split("(?i).*function");
                 if (macro.length > 1) {
-                    Logger.getAnonymousLogger().info((line));
-
                     var namePlusRight = macro[1].trim();
                     if (!namePlusRight.isBlank()) {
-                        Logger.getAnonymousLogger().info(Arrays.deepToString(macro));
-                        var tok = grammar.tokenizeLine(namePlusRight).getTokens()[0];
-                        Logger.getAnonymousLogger().info(tok.toString());
-                        Logger.getAnonymousLogger().info(namePlusRight.toString());
+                        var tok = grammar.tokenizeLine(namePlusRight).get(0);
                         var def = namePlusRight.subSequence(tok.getStartIndex(), tok.getEndIndex()).toString();
 
                         addDefinition(def,

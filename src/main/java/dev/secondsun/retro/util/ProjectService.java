@@ -46,7 +46,6 @@ public class ProjectService {
     private void _includeDir(URI directory) {
         //Include everything in workspace root
         var workspacePath  = Path.of(directory);
-        System.err.println(directory.toString());
         Arrays.stream(workspacePath.toFile().listFiles(new FileFilter() {
 
             @Override
@@ -75,27 +74,15 @@ public class ProjectService {
         
     }
 
-
-
     public void refreshFileContents(URI uri) {
         var fileUri = normalize(uri);
-        Logger.getAnonymousLogger().info("refreshFileContents");
-        Logger.getAnonymousLogger().info(fileUri.toString());
-        Logger.getAnonymousLogger().info(files.keySet().stream().map(URI::toString).collect(Collectors.joining("\n\t")));
-        
         try {
             files.put(fileUri, fileService.readLines(fileUri));
             symbolService.extractDefinitions(fileUri, files.get(fileUri));
         } catch (IOException e) {
             Logger.getAnonymousLogger().severe(e.getMessage());
         }
-        
-
-
-        
     }
-
-
 
     public List<String> getFileContents(URI uri) {
         uri = normalize(uri);

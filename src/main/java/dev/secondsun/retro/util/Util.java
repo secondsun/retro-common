@@ -1,7 +1,5 @@
 package dev.secondsun.retro.util;
 
-import dev.secondsun.tm4e.core.grammar.IToken;
-import dev.secondsun.tm4e.core.grammar.ITokenizeLineResult;
 
 import java.io.InputStream;
 import java.text.StringCharacterIterator;
@@ -26,7 +24,7 @@ public final class  Util {
     
 
 
-    public static String getTokenText(String line, IToken token) {
+    public static String getTokenText(String line, Token token) {
         var start = token.getStartIndex();
         var end = token.getEndIndex();
         if (start < 0) {
@@ -38,9 +36,9 @@ public final class  Util {
         return line.substring(start, end);
     }
 
-    public static Optional<IToken> getTokenAt(ITokenizeLineResult lineTokens, int position) {
-        var tokenList = Arrays.asList(lineTokens.getTokens());
-        return tokenList.stream().filter(token -> token.getStartIndex() < position && token.getEndIndex() >= position)
+    public static Optional<Token> getTokenAt(List<Token> lineTokens, int position) {
+        
+        return lineTokens.stream().filter(token -> token.getStartIndex() < position && token.getEndIndex() >= position)
                 .findFirst();
 
     }
