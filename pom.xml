@@ -6,7 +6,7 @@
 
     <groupId>dev.secondsun</groupId>
     <artifactId>retro-common</artifactId>
-    <version>1.0</version>
+    <version>1.1</version>
     <name>${project.groupId}:${project.artifactId}</name>
 
     <description>This is a library that provides common classes and utilities for secondsun's retro projects.

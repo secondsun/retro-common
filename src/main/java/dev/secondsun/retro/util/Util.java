@@ -94,4 +94,20 @@ public final class  Util {
         return replacement;
     }
 
+    public static String removeComments(String sgsProgram) {
+        sgsProgram = sgsProgram.replaceAll(";.*"," ");
+        var builder = new StringBuilder(sgsProgram);
+
+        var startCommentIndex = builder.indexOf("/*");
+        while (startCommentIndex > -1) {
+            var endCommentIndex = builder.indexOf("*/");
+            for (var i = startCommentIndex; i < (endCommentIndex+2);i++ ) {
+                if (!Character.isWhitespace(builder.charAt(i)) ) {
+                    builder.replace(i,i+1," ");
+                }
+            }
+            startCommentIndex = builder.indexOf("/*");
+        }
+        return builder.toString();
+    }
 }

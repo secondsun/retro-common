@@ -27,15 +27,15 @@ public class FirstTest {
     public void printTestSgs() throws Exception {
         CA65Scanner grammar = new CA65Scanner();
         
-        var sgsProgram = Util.toString(Util.class.getClassLoader().getResourceAsStream("libSFX.i"));
-        
-        Arrays.asList(sgsProgram.split("\n")).forEach(line -> {
-            var lineTokens = grammar.tokenizeLine(line);
+        var sgsProgram = Util.toString(UtilTest.class.getClassLoader().getResourceAsStream("libSFX.i"));
+        var tf = grammar.tokenize(sgsProgram);
+        tf.forEach((index, line) -> {
+            var lineTokens = line.tokens();
             System.out.println(line);
             for (int i = 0; i < lineTokens.size(); i++) {
                 Token token = lineTokens.get(i);
                 System.out.println("Token from " + token.getStartIndex() + " to " + token.getEndIndex() + " with scopes "
-                        + token.getScopes());
+                        + token.getType().name());
             }
         });
 
@@ -59,6 +59,6 @@ public class FirstTest {
 
     private URI getTestDirURI() throws IOException {
         File file = new File(getClass().getClassLoader().getResource("includeTest/test.sgs").getFile());
-        return file.getParentFile().getCanonicalFile().toURI();
+        return file.getParentFile().getCanonicalFile().toPath().toUri();
     }
 }

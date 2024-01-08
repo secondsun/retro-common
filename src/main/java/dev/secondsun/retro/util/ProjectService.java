@@ -12,6 +12,8 @@ import java.util.Map;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
+import dev.secondsun.retro.util.vo.TokenizedFile;
+
 /**
  * This service is used for initializing the root directory.
  * 
@@ -23,7 +25,7 @@ public class ProjectService {
 
     private FileService fileService;
     private SymbolService symbolService;
-    Map<URI, List<String>> files = new HashMap<>();
+    Map<URI, TokenizedFile> files = new HashMap<>();
 
 
     public ProjectService(FileService fileService, SymbolService symbolService) {
@@ -57,7 +59,7 @@ public class ProjectService {
             }
             
         })).forEach((file)-> {
-            var fileUri = normalize(file.toURI());
+            var fileUri = normalize(file.toPath().toUri());
             files.computeIfAbsent(fileUri, (key) -> {
                 try {
                     var lines = fileService.readLines(fileUri);
@@ -66,7 +68,7 @@ public class ProjectService {
                     throw new RuntimeException(e);
                 }
             });
-            symbolService.extractDefinitions(fileUri, files.get(fileUri));
+            symbolService.extractDefinitions(files.get(fileUri));
         });
 
         Arrays.stream(workspacePath.toFile().listFiles(file->file.isDirectory())).map(File::toURI).forEach(uri -> this._includeDir(uri));
@@ -78,19 +80,19 @@ public class ProjectService {
         var fileUri = normalize(uri);
         try {
             files.put(fileUri, fileService.readLines(fileUri));
-            symbolService.extractDefinitions(fileUri, files.get(fileUri));
+            symbolService.extractDefinitions( files.get(fileUri));
         } catch (IOException e) {
             Logger.getAnonymousLogger().severe(e.getMessage());
         }
     }
 
-    public List<String> getFileContents(URI uri) {
+    public TokenizedFile getFileContents(URI uri) {
         uri = normalize(uri);
         var lines = files.get(uri);
-        if (isNullOrEmpty(lines)) {
+        if (lines == null) {
             Logger.getAnonymousLogger().warning(uri.getRawSchemeSpecificPart() + " could not be found in read files.");
             Logger.getAnonymousLogger().warning(files.keySet().stream().map(URI::getRawSchemeSpecificPart).collect(Collectors.joining("\t\n")));
-            return List.of();
+            return TokenizedFile.EMPTY;
         }
         return lines;
     }
@@ -105,7 +107,7 @@ public class ProjectService {
      */
     private URI normalize(URI uri) {
       try {
-        return  new File(uri.getRawSchemeSpecificPart().replace("%3A", ":")).getCanonicalFile().toURI();
+        return  new File(uri.getRawSchemeSpecificPart().replace("%3A", ":")).getCanonicalFile().toPath().toUri();
     } catch (IOException e) {
         throw new RuntimeException(e);
     }

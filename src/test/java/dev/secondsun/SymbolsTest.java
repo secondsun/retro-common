@@ -26,7 +26,7 @@ import dev.secondsun.retro.util.Location;
  */
 public class SymbolsTest {
     
-    private static final URI SYMBOLS_URI =URI.create("file:/C:/Users/secon/Projects/retro-lsp/target/test-classes/symbolTest/symbol.s");
+    private static final URI SYMBOLS_URI =URI.create("file:/C:/Users/secon/Projects/retro-common/target/test-classes/symbolTest/./symbol.s");
 
     /**
      * A symbol is defined when it is the only element on a line and ends with a ":"
@@ -46,13 +46,13 @@ public class SymbolsTest {
 
         var lines = fileService.readLines(URI.create("./symbol.s"));
         
-        symbolService.extractDefinitions(SYMBOLS_URI, lines);
+        symbolService.extractDefinitions( lines);
 
         var location = symbolService.getLocation("labelDef");
-        assertEquals(new Location(SYMBOLS_URI, 0,0,9), location);
+        assertEquals(new Location(SYMBOLS_URI, 0,0,8), location);
         
         var bobLocation = symbolService.getLocation("bob");
-        assertEquals(new Location(SYMBOLS_URI, 14,0,5), bobLocation);
+        assertEquals(new Location(SYMBOLS_URI, 14,0,3), bobLocation);
 
     }
 
@@ -73,7 +73,7 @@ public class SymbolsTest {
 
 
         var lines = fileService.readLines(URI.create("./symbol.s"));
-        symbolService.extractDefinitions(SYMBOLS_URI, lines);
+        symbolService.extractDefinitions( lines);
 
         var location = symbolService.getLocation("camera");
         assertEquals(new Location(SYMBOLS_URI, 5,0,14), location);
@@ -95,9 +95,8 @@ public void printLines() throws Exception {
         File file = new File(classLoader.getResource("symbolTest").getFile());
         fileService.addSearchPath(file.toURI());
 
-        fileService.readLines(URI.create("./symbol.s")).forEach((line)->{
+        fileService.readLines(URI.create("./symbol.s")).forEach((index,line)->{
             System.out.println(line);
-            grammar.tokenizeLine(line).stream().map(Object::toString).forEach(System.out::println);
         });
 }
 

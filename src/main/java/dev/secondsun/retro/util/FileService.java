@@ -5,11 +5,10 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.logging.Logger;
+
+import dev.secondsun.retro.util.vo.TokenizedFile;
 
 public class FileService {
 
@@ -27,28 +26,36 @@ public class FileService {
     }
 
 
-    public List<String> readLines(final URI fileUri) throws IOException {
+    public TokenizedFile readLines(URI fileUri) throws IOException {
 
         var possibleFile = new File(fileUri.getRawSchemeSpecificPart());
         if (possibleFile.exists()) {
             try (var stream = new FileInputStream(possibleFile)) {
-                return Util.readLines(stream);
+                var fileByLinesAsString = Util.toString(stream);
+                var tokenized =  new CA65Scanner().tokenize(fileByLinesAsString);
+                tokenized.uri = possibleFile.toURI();
+                return tokenized;
             }
         }
 
+        final var fileUri2 = fileUri;
         final var fileToRead = repositories.stream()
-        .map( it -> Path.of(it).resolve(Path.of(fileUri.getRawSchemeSpecificPart())).toFile())
+        .map( it -> Path.of(it).resolve(fileUri2.toString()).toFile())
         .filter(File::exists)
         .findFirst();
 
         if (fileToRead.isPresent()) {
             var file  = fileToRead.get();
             try (var stream = new FileInputStream(file)) {
-                return Util.readLines(stream);
+                var fileByLinesAsString = Util.toString(stream);
+                fileByLinesAsString = Util.removeComments(fileByLinesAsString);
+                var tokenized =  new CA65Scanner().tokenize(fileByLinesAsString);
+                tokenized.uri = file.toURI();
+                return tokenized;
             }
         }
         
-        return new ArrayList<>();
+        return TokenizedFile.EMPTY;
         
     }
 

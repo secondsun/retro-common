@@ -2,7 +2,7 @@
 ; Super Famicom Development Framework
 ; David Lindecrantz <optiroc@gmail.com>
 
-.feature c_comments
+.feature c_comments ;crash
 .p816
 .smart -
 .linecont +
