@@ -45,7 +45,6 @@ public class SymbolsTest {
 
 
         var lines = fileService.readLines(URI.create("./symbol.s"));
-        
         symbolService.extractDefinitions( lines);
 
         var location = symbolService.getLocation("labelDef");
