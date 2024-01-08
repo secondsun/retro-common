@@ -15,7 +15,7 @@ public class TokenizedFile {
     public URI uri;
 
     public int textLines() {
-        return lineCount;
+        return lineCount+1;//lineCount is ACTUALLY the max index.
     }
 
     public void addLine(String line,int index,  List<Token> tokens) {
