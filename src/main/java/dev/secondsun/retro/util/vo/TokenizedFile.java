@@ -26,9 +26,17 @@ public class TokenizedFile {
     }
 
     public String getLineText(int idx) {
+        var thing = fileLines.get(idx);
+        if (thing == null) {
+            return "";
+        }
         return fileLines.get(idx).line();
     }
     public List<Token> getLineTokens(int idx) {
+        var thing = fileLines.get(idx);
+        if (thing == null) {
+            return List.of();
+        }
         return fileLines.get(idx).tokens();
     }
 
