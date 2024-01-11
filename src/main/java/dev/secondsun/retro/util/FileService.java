@@ -7,6 +7,7 @@ import java.net.URI;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 import dev.secondsun.retro.util.vo.TokenizedFile;
 
@@ -18,7 +19,8 @@ public class FileService {
     
     public FileService addSearchPath(URI repoURI) {
         if (Path.of(repoURI).toFile().exists()) {
-            repositories.add(repoURI);
+
+            repositories.add(Util.normalize(repoURI));
         } else {
             System.out.println(repoURI + " does not exist.");
         }
@@ -62,16 +64,24 @@ public class FileService {
     public List<URI> find(URI file, URI... optionalSearchPaths) {
         
         //We're allocating a copy of the localRepos and adding optionalSearchPaths
-        var localRepos = new ArrayList<>(this.repositories);
-        if (optionalSearchPaths != null && optionalSearchPaths.length >0) {
-            localRepos.addAll(List.of(optionalSearchPaths));
+        if (optionalSearchPaths != null && optionalSearchPaths.length >0){
+
+            LOG.info("optionalSearchPaths normalized for " + (Util.normalize(optionalSearchPaths[0])).toString());
+            LOG.info("optionalSearchPaths as file exists? " + (new File(optionalSearchPaths[0])).exists());
         }
 
+        var localRepos = new ArrayList<>(this.repositories);
+        if (optionalSearchPaths != null && optionalSearchPaths.length >0) {
+            localRepos.addAll(List.of(optionalSearchPaths).stream().map(Util::normalize).toList());
+            
+        }
+        LOG.info("find " + file + " in " + localRepos.stream().map(Object::toString).collect(Collectors.joining(",")));
+        
         List<URI> list = new ArrayList<>();
 
         localRepos.forEach(repo->{
             var pathForRepo = Path.of(repo).resolve(file.toString()).toFile();
-            
+            LOG.info("Looking for " + pathForRepo);    
             if (pathForRepo.exists()) {
                 list.add(pathForRepo.toURI());
             }

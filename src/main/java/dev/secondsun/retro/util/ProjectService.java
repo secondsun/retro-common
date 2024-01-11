@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
-
+import static dev.secondsun.retro.util.Util.normalize;
 import dev.secondsun.retro.util.vo.TokenizedFile;
 
 /**
@@ -41,13 +41,16 @@ public class ProjectService {
      * @param directory URI of path to directory
      */
     public void includeDir(URI directory) {
+        Logger.getAnonymousLogger().info("Including directory " + directory);
         directory = normalize(directory);
         this.fileService.addSearchPath(directory);
         _includeDir(directory);
     }
     private void _includeDir(URI directory) {
         //Include everything in workspace root
+        Logger.getAnonymousLogger().info("Including directory " + directory);
         var workspacePath  = Path.of(directory);
+        Logger.getAnonymousLogger().info("Including workspacePath " + workspacePath);
         Arrays.stream(workspacePath.toFile().listFiles(new FileFilter() {
 
             @Override
@@ -88,6 +91,7 @@ public class ProjectService {
 
     public TokenizedFile getFileContents(URI uri) {
         uri = normalize(uri);
+        Logger.getAnonymousLogger().info("Getting file contents for " + uri.toString() + " found " + files.get(uri));
         var lines = files.get(uri);
         if (lines == null) {
             Logger.getAnonymousLogger().warning(uri.getRawSchemeSpecificPart() + " could not be found in read files.");
@@ -96,23 +100,6 @@ public class ProjectService {
         }
         return lines;
     }
-
-
-
-    /**
-     * On windows unescape the uri we receive from the language client
-     * 
-     * @param uri
-     * @return
-     */
-    private URI normalize(URI uri) {
-      try {
-        return  new File(uri.getRawSchemeSpecificPart().replace("%3A", ":")).getCanonicalFile().toPath().toUri();
-    } catch (IOException e) {
-        throw new RuntimeException(e);
-    }
-    }
-
 
 
     private boolean isNullOrEmpty(List<String> lines) {

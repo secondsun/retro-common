@@ -61,4 +61,11 @@ public class FirstTest {
         File file = new File(getClass().getClassLoader().getResource("includeTest/test.sgs").getFile());
         return file.getParentFile().getCanonicalFile().toPath().toUri();
     }
+
+    @Test
+    public void meh() {
+        var uriString = "file:///c%3A/Users/secon/Projects/snes-sfx-games/X-GSU";
+        var uri = URI.create("/").relativize(URI.create(uriString));
+        System.out.println(uri.toString());
+    }
 }

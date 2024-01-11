@@ -1,7 +1,9 @@
 package dev.secondsun.retro.util;
 
 
+import java.net.URI;
 import java.io.InputStream;
+import java.io.File;
 import java.text.StringCharacterIterator;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -17,6 +19,16 @@ public final class  Util {
         return list;
         
     }
+
+    /**
+     * On windows unescape the uri we receive from the language client
+     * 
+     * @param uri
+     * @return
+     */
+    public static URI normalize(URI uri) {
+        return  new File(uri).getAbsoluteFile().toURI();
+      }
 
 	public static String toString(InputStream resourceAsStream) {
 		return readLines(resourceAsStream).stream().collect(Collectors.joining("\n"));
