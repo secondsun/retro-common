@@ -66,8 +66,7 @@ public class FileService {
         //We're allocating a copy of the localRepos and adding optionalSearchPaths
         if (optionalSearchPaths != null && optionalSearchPaths.length >0){
 
-            LOG.info("optionalSearchPaths normalized for " + (Util.normalize(optionalSearchPaths[0])).toString());
-            LOG.info("optionalSearchPaths as file exists? " + (new File(optionalSearchPaths[0])).exists());
+            
         }
 
         var localRepos = new ArrayList<>(this.repositories);
@@ -75,13 +74,13 @@ public class FileService {
             localRepos.addAll(List.of(optionalSearchPaths).stream().map(Util::normalize).toList());
             
         }
-        LOG.info("find " + file + " in " + localRepos.stream().map(Object::toString).collect(Collectors.joining(",")));
+        
         
         List<URI> list = new ArrayList<>();
 
         localRepos.forEach(repo->{
             var pathForRepo = Path.of(repo).resolve(file.toString()).toFile();
-            LOG.info("Looking for " + pathForRepo);    
+            
             if (pathForRepo.exists()) {
                 list.add(pathForRepo.toURI());
             }

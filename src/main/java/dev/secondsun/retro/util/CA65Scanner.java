@@ -177,6 +177,7 @@ public class CA65Scanner {
 
             /* Ignore leading zeros */
             while (c == '0') {
+                toReturn.appendChar(c);
                 c = nextChar();
             }
 
@@ -192,6 +193,7 @@ public class CA65Scanner {
                     if (Digits < buf.length) {
                         buf[Digits++] = c;
                     }
+                    toReturn.appendChar(c);
                     c = nextChar();
                 } else {
                     break;
@@ -200,6 +202,7 @@ public class CA65Scanner {
 
             /* Allow zilog/intel style hex numbers with a 'h' suffix */
             if (c == 'h' || c == 'H') {
+                toReturn.appendChar(c);
                 c = nextChar();
                 Base = 16;
                 Max = 0x7FFFFFFF / 16;
@@ -212,7 +215,6 @@ public class CA65Scanner {
             toReturn.intVal = 0;
             for (I = 0; I < Digits; ++I) {
                 if (toReturn.intVal > Max) {
-
                     return error("Number out of range", toReturn);
                 }
                 DVal = digitVal(buf[I]);
@@ -237,6 +239,7 @@ public class CA65Scanner {
             /* Check if it's just a dot */
             if (!isIdStart(c)) {
                 /* Just a dot */
+                toReturn.appendChar('.');
                 toReturn.type = TokenType.TOK_DOT;
             } else {
 
@@ -344,18 +347,21 @@ public class CA65Scanner {
         CharAgain: switch (c) {
 
             case '+':
+                toReturn.appendChar(c);
                 c = nextChar();
                 toReturn.type = TokenType.TOK_PLUS;
                 toReturn.endIndex = column;
                 return toReturn;
 
             case '-':
+                toReturn.appendChar(c);
                 c = nextChar();
                 toReturn.type = TokenType.TOK_MINUS;
                 toReturn.endIndex = column;
                 return toReturn;
 
             case '/':
+                toReturn.appendChar(c);
                 c = nextChar();
                 if (c != '*') {
                     toReturn.type = TokenType.TOK_DIV;
@@ -364,20 +370,24 @@ public class CA65Scanner {
                 return toReturn;
 
             case '*':
+                toReturn.appendChar(c);
                 c = nextChar();
                 toReturn.type = TokenType.TOK_MUL;
                 toReturn.endIndex = column;
                 return toReturn;
 
             case '^':
+                toReturn.appendChar(c);
                 c = nextChar();
                 toReturn.type = TokenType.TOK_XOR;
                 toReturn.endIndex = column;
                 return toReturn;
 
             case '&':
+                toReturn.appendChar(c);
                 c = nextChar();
                 if (c == '&') {
+                    toReturn.appendChar(c);
                     c = nextChar();
                     toReturn.type = TokenType.TOK_BOOLAND;
                 } else {
@@ -387,6 +397,7 @@ public class CA65Scanner {
                 return toReturn;
 
             case '|':
+                toReturn.appendChar(c);
                 c = nextChar();
                 if (c == '|') {
                     c = nextChar();
@@ -398,10 +409,11 @@ public class CA65Scanner {
                 return toReturn;
 
             case ':':
+                toReturn.appendChar(c);
                 c = nextChar();
                 switch (c) {
-
                     case ':':
+                        toReturn.appendChar(c);
                         c = nextChar();
                         toReturn.type = TokenType.TOK_NAMESPACE;
                         toReturn.endIndex = column;
@@ -412,6 +424,7 @@ public class CA65Scanner {
                         do {
                             --toReturn.intVal;
                             toReturn.endIndex = column;
+                            toReturn.appendChar(c);
                             c = nextChar();
                         } while (c == '-');
                         toReturn.type = TokenType.TOK_ULABEL;
@@ -422,12 +435,14 @@ public class CA65Scanner {
                         do {
                             ++toReturn.intVal;
                             toReturn.endIndex = column;
+                            toReturn.appendChar(c);
                             c = nextChar();
                         } while (c == '+');
                         toReturn.type = TokenType.TOK_ULABEL;
                         break;
 
                     case '=':
+                        toReturn.appendChar(c);
                         c = nextChar();
                         toReturn.type = TokenType.TOK_ASSIGN;
                         break;
@@ -441,31 +456,35 @@ public class CA65Scanner {
                 return toReturn;
 
             case ',':
+                toReturn.appendChar(c);
                 c = nextChar();
                 toReturn.type = TokenType.TOK_COMMA;
                 toReturn.endIndex = column;
                 return toReturn;
             case '#':
+                toReturn.appendChar(c);
                 c = nextChar();
                 toReturn.type = TokenType.TOK_HASH;
                 toReturn.endIndex = column;
                 return toReturn;
 
             case '(':
+                toReturn.appendChar(c);
                 c = nextChar();
                 toReturn.type = TokenType.TOK_LPAREN;
                 toReturn.endIndex = column;
                 return toReturn;
             case ')':
+                toReturn.appendChar(c);
                 c = nextChar();
                 toReturn.type = TokenType.TOK_RPAREN;
                 toReturn.endIndex = column;
                 return toReturn;
 
             case '[':
+                toReturn.appendChar(c);
                 c = nextChar();
                 toReturn.type = TokenType.TOK_LBRACK;
-                toReturn.endIndex = column;
                 toReturn.endIndex = column;
                 return toReturn;
 

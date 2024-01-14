@@ -41,16 +41,14 @@ public class ProjectService {
      * @param directory URI of path to directory
      */
     public void includeDir(URI directory) {
-        Logger.getAnonymousLogger().info("Including directory " + directory);
+        
         directory = normalize(directory);
         this.fileService.addSearchPath(directory);
         _includeDir(directory);
     }
     private void _includeDir(URI directory) {
         //Include everything in workspace root
-        Logger.getAnonymousLogger().info("Including directory " + directory);
         var workspacePath  = Path.of(directory);
-        Logger.getAnonymousLogger().info("Including workspacePath " + workspacePath);
         Arrays.stream(workspacePath.toFile().listFiles(new FileFilter() {
 
             @Override
@@ -91,7 +89,6 @@ public class ProjectService {
 
     public TokenizedFile getFileContents(URI uri) {
         uri = normalize(uri);
-        Logger.getAnonymousLogger().info("Getting file contents for " + uri.toString() + " found " + files.get(uri));
         var lines = files.get(uri);
         if (lines == null) {
             Logger.getAnonymousLogger().warning(uri.getRawSchemeSpecificPart() + " could not be found in read files.");
