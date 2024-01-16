@@ -55,9 +55,6 @@ public class CA65Scanner {
             line++;
         }
         c = lines.get(line).charAt(column);
-
-
-
         for (var line : lines) {
 
             if (!line.isBlank()) {

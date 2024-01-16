@@ -42,4 +42,7 @@ public class Token {
     }
 
 
+    public void addAttribute(TokenAttribute tokenAttribute) {
+        attributes.add(tokenAttribute);
+    }
 }
