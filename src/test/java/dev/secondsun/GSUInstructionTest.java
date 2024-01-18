@@ -1,5 +1,6 @@
 package dev.secondsun;
 
+import dev.secondsun.retro.util.instruction.Instructions;
 import org.junit.jupiter.api.Test;
 
 import dev.secondsun.retro.util.CA65Scanner;
@@ -24,6 +25,36 @@ public class GSUInstructionTest {
         System.out.println("test");
     }
 
+    @Test
+    public void testInstructionMatchers() {
+        var tokenized = new CA65Scanner().tokenize("NOP");
+        new GsuInstructionAttributeAdder().applyAttributes(tokenized.getLineTokens(0));
+        assertTrue(tokenized.getLineTokens(0).get(0).hasAttribute(TokenAttribute.GSU_INSTRUCTION));
+        assertTrue(Instructions.NOP.matches(tokenized.getLine(0)));
+
+        tokenized = new CA65Scanner().tokenize("IWT r1");
+        new GsuInstructionAttributeAdder().applyAttributes(tokenized.getLineTokens(0));
+        assertFalse(Instructions.IWT.matches(tokenized.getLine(0)));
+
+        tokenized = new CA65Scanner().tokenize("IWT r5, #4");
+        new GsuInstructionAttributeAdder().applyAttributes(tokenized.getLineTokens(0));
+        assertTrue(tokenized.getLineTokens(0).get(0).hasAttribute(TokenAttribute.GSU_INSTRUCTION));
+        assertTrue(Instructions.IWT.matches(tokenized.getLine(0)));
+
+
+    }
+
+    @Test
+    public void testLabelMatcher() {
+        var program = """
+                    bra e
+                """;
+        var tokenized = new CA65Scanner().tokenize(program);
+        new GsuInstructionAttributeAdder().applyAttributes(tokenized.getLineTokens(0));
+        assertTrue(Instructions.BRA.matches(tokenized.getLine(0)));
+        assertEquals(TokenType.TOK_IDENT, tokenized.getLineTokens(0).get(1).type);
+
+    }
     @Test
     public void testTokenizationAndInstructionID() {
         var program = """
