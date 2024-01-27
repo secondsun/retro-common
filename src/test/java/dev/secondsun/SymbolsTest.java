@@ -1,22 +1,16 @@
 package dev.secondsun;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
-
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.util.Arrays;
 
-import dev.secondsun.retro.util.Util;
+import dev.secondsun.retro.util.*;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
-import dev.secondsun.retro.util.CA65Scanner;
-import dev.secondsun.retro.util.FileService;
-import dev.secondsun.retro.util.SymbolService;
-import dev.secondsun.retro.util.Location;
+import static org.junit.jupiter.api.Assertions.*;
+
 /**
  * This is a suite of tests that test 
  *   1) symbol identification 
@@ -77,6 +71,48 @@ public class SymbolsTest {
         var location = symbolService.getLocation("camera");
         assertEquals(new Location(SYMBOLS_URI, 5,0,14), location);
         
+    }
+
+    /**
+     * Does a label lookup work everywhere
+     * @throws Exception
+     */
+    @Test
+    public void fullSystemLabelLink() throws Exception {
+        var symbolService = new SymbolService();
+        var fileService = new FileService();
+        var projectService = new ProjectService(fileService, symbolService);
+
+        projectService.includeDir(getHomebrewDirURI());
+
+
+        var lines = projectService.getFileContents(getHomebrewDirURI().resolve("./tests/decode_rnc/Test.sgs"));
+        symbolService.extractDefinitions( lines );
+
+        var location = symbolService.getLocation("initialize_buffer");
+        assertNotNull(location);
+
+    }
+
+
+    @Test
+    public void semiColonInStringIsNotAComment() {
+        var program = """
+                ;This is a comment
+                ";" This is not a comment
+                ";" ; This is a comment
+                """;
+
+        var expected = """
+                                 \s
+                ";" This is not a comment
+                ";"                   \s
+                """;
+
+
+        var stripped = Util.removeComments(program);
+        assertEquals(expected, stripped);
+
     }
 
 @Test
@@ -140,6 +176,14 @@ public void libsfxTracer() {
             throw new RuntimeException(e);
         }
         
+    }
+
+    private URI getHomebrewDirURI() {
+        try {
+            return new File(getClass().getClassLoader().getResource("homebrew/X-GSU/.").getFile()).getCanonicalFile().toURI();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
 }

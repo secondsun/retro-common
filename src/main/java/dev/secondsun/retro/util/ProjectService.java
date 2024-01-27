@@ -5,10 +5,7 @@ import java.io.FileFilter;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Path;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import static dev.secondsun.retro.util.Util.normalize;
@@ -49,27 +46,48 @@ public class ProjectService {
     private void _includeDir(URI directory) {
         //Include everything in workspace root
         var workspacePath  = Path.of(directory);
-        Arrays.stream(workspacePath.toFile().listFiles(new FileFilter() {
+
+        var thing = (workspacePath.toFile().listFiles(new FileFilter() {
 
             @Override
             public boolean accept(File pathname) {
                 return pathname.getName().endsWith(".s") ||
-                pathname.getName().endsWith(".sgs") ||
-                pathname.getName().endsWith(".i") ||
-                pathname.getName().endsWith(".inc");
+                        pathname.getName().endsWith(".sgs") ||
+                        pathname.getName().endsWith(".i") ||
+                        pathname.getName().endsWith(".inc");
             }
-            
-        })).forEach((file)-> {
+
+        }));
+
+        if (thing == null) {
+            return;
+        }
+
+        Arrays.stream(thing).forEach((file)-> {
             var fileUri = normalize(file.toPath().toUri());
-            files.computeIfAbsent(fileUri, (key) -> {
-                try {
-                    var lines = fileService.readLines(fileUri);
-                    return lines;
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            });
-            symbolService.extractDefinitions(files.get(fileUri));
+
+            if (!files.containsKey(fileUri)) {
+
+                files.computeIfAbsent(fileUri, (key) -> {
+                    try {
+                        var lines = fileService.readLines(fileUri);
+                        return lines;
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+
+                files.get(fileUri).forEach((line,tokens) -> {
+                    if (Util.isIncludeDirective(tokens.line().trim())) {
+                        fileService.find(
+                                URI.create(
+                                        ("./" + (tokens.tokens().get(1).text().replace("\"","").trim())
+                                        ))).stream().map(File::new).filter(File::exists).map(it->it.getParentFile().getAbsoluteFile().toURI()).forEach(this::includeDir);
+                    }});
+
+                symbolService.extractDefinitions(files.get(fileUri));
+            }
+
         });
 
         Arrays.stream(workspacePath.toFile().listFiles(file->file.isDirectory())).map(File::toURI).forEach(uri -> this._includeDir(uri));

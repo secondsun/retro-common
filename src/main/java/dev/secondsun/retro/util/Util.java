@@ -27,7 +27,7 @@ public final class  Util {
      * @return
      */
     public static URI normalize(URI uri) {
-        return  new File(uri).getAbsoluteFile().toURI();
+        return  new File(uri).getAbsoluteFile().toURI().normalize();
       }
 
 	public static String toString(InputStream resourceAsStream) {
@@ -106,20 +106,49 @@ public final class  Util {
         return replacement;
     }
 
-    public static String removeComments(String sgsProgram) {
-        sgsProgram = sgsProgram.replaceAll(";.*"," ");
-        var builder = new StringBuilder(sgsProgram);
+    public static String removeComments(String sgsProgramString) {
+        char[] sgsProgram = sgsProgramString.toCharArray();
+        for (var charIndex = 0; charIndex < sgsProgram.length; charIndex++) {
+            var charAt = sgsProgram[charIndex];
+            switch (charAt) {
+                case ';':
+                    sgsProgram[charIndex] = ' ';
+                    charIndex++;
+                    while ((charIndex < sgsProgram.length) && sgsProgram[charIndex] != '\n') {
+                        sgsProgram[charIndex] = ' ';
+                        charIndex++;
+                    }
+                    break;
+                case '"':
+                    charIndex++;
+                    while ((charIndex < sgsProgram.length) && sgsProgram[charIndex] != '"') {
+                        charIndex++;
+                    }
+                    break;
+                case '/':
+                    charIndex++;
+                    if ((charIndex < sgsProgram.length) && sgsProgram[charIndex] == '*') {
+                        sgsProgram[charIndex-1] = ' ';
+                        sgsProgram[charIndex] = ' ';
+                        charIndex++;
 
-        var startCommentIndex = builder.indexOf("/*");
-        while (startCommentIndex > -1) {
-            var endCommentIndex = builder.indexOf("*/");
-            for (var i = startCommentIndex; i < (endCommentIndex+2);i++ ) {
-                if (!Character.isWhitespace(builder.charAt(i)) ) {
-                    builder.replace(i,i+1," ");
-                }
+                        while ((charIndex < sgsProgram.length) ) {
+                            sgsProgram[charIndex] = ' ';
+                            charIndex++;
+                            if ((charIndex < sgsProgram.length) && sgsProgram[charIndex] == '*') {
+                                if (((charIndex+1) < sgsProgram.length) && sgsProgram[charIndex+1] == '/') {
+                                    sgsProgram[charIndex] = ' ';
+                                    charIndex++;
+                                    sgsProgram[charIndex] = ' ';
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    break;
+
             }
-            startCommentIndex = builder.indexOf("/*");
         }
-        return builder.toString();
+        return new String(sgsProgram);
     }
 }

@@ -84,6 +84,7 @@ public class CA65Scanner {
 
         /* Skip whitespace */
         if (isBlank(c)) {
+
             do {
                 c = nextChar();
             } while (isBlank(c) && !isForcedEnd && !newLine);

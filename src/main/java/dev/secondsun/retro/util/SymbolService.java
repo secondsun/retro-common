@@ -7,11 +7,7 @@ import dev.secondsun.retro.util.vo.TokenizedFile;
 
 public class SymbolService {
 
-    private static final String VARIABLE_DEFINITION = "variable.other.definition";
-
     public Map<String, Location> definitions = new HashMap<>();
-
-    
 
     public void addDefinition(String name, Location location) {
         definitions.put(name, location);
@@ -56,19 +52,15 @@ public class SymbolService {
                             new Location(file.uri(), idx, 0, tokenized.get(1).endIndex));
                 }
 
-
             }
 
-
             // find functions. Functions are a Summersism
-
 
             if (tokenized.size() == 2 && Objects.equals(tokenized.get(0).text(), "function")) {
                     var def = tokenized.get(1).text();
                     addDefinition(def,
                             new Location(file.uri(), idx, 0, line.length()));
             }
-
 
         });
 
