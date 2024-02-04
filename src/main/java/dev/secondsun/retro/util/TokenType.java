@@ -216,5 +216,6 @@ public enum TokenType {
     TOK_WORD,
     TOK_XMATCH,
     TOK_ZEROPAGE,
+    TOK_REGISTER,
     TOK_LASTPSEUDO
 }

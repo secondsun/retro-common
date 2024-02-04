@@ -60,6 +60,7 @@ public class CA65Scanner {
             if (!line.isBlank()) {
                 var lineNumber = this.line;
                 var tokens = tokenizeLine(line);
+                tokens.forEach(it -> it.lineNumber = lineNumber);
                 toReturn.addLine(line,lineNumber, tokens);
             }
         }
@@ -285,7 +286,6 @@ public class CA65Scanner {
             switch (toReturn.text().length()) {
                 case 1:
                     switch (Character.toUpperCase(toReturn.text().charAt(0))) {
-
                         case 'A':
                             if (c == ':') {
                                 c = nextChar();
@@ -331,8 +331,20 @@ public class CA65Scanner {
                         default:
                             break;
                     }
+                default:
                     break;
 
+            }
+
+            switch (Character.toUpperCase(toReturn.text().charAt(0))) {
+                case 'r':
+                case 'R':
+                    if (toReturn.text().matches("[rR]\\d{1,2}")) {
+                        toReturn.type = TokenType.TOK_REGISTER;
+                        toReturn.endIndex = column;
+                        return toReturn;
+                    }
+                    break;
             }
 
             /* Check for define style macro */

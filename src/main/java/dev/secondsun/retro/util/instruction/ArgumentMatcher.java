@@ -3,6 +3,7 @@ package dev.secondsun.retro.util.instruction;
 import dev.secondsun.retro.util.Token;
 import dev.secondsun.retro.util.TokenType;
 
+import java.util.Arrays;
 import java.util.List;
 
 public sealed interface ArgumentMatcher {
@@ -81,9 +82,13 @@ public sealed interface ArgumentMatcher {
             if (in.isEmpty()) {
                 return false;
             } else {
-
+                var matches = true;
+                matches = matches && in.remove(0).type == TokenType.TOK_LPAREN;
+                matches = matches && Arrays.asList(TokenType.TOK_INTCON, TokenType.TOK_IDENT, TokenType.TOK_REGISTER).contains(in.remove(0).type);
+                matches = matches && in.remove(0).type == TokenType.TOK_RPAREN;
+                return matches;
             }
-            throw new IllegalStateException("Not Implemented");
+
         }
     }
 

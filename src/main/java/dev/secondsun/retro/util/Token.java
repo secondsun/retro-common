@@ -9,6 +9,7 @@ public class Token {
     public int startIndex;
     public int endIndex;
     public String message;
+    public int lineNumber;
     public int intVal;
     private StringBuilder stringBuffer = new StringBuilder();
     private Set<TokenAttribute> attributes = new HashSet<TokenAttribute>();  
