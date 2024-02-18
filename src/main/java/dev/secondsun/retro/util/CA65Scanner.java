@@ -267,6 +267,12 @@ public class CA65Scanner {
                 return toReturn;
             }
 
+            if (toReturn.text().equals("register")) {
+                toReturn.type = TokenType.TOK_REGISTER_KEYWORD;
+                toReturn.endIndex = column;
+                return toReturn;
+            }
+
             /* A local identifier */
             toReturn.type = TokenType.TOK_LOCAL_IDENT;
             toReturn.endIndex = column;
@@ -347,6 +353,11 @@ public class CA65Scanner {
                     break;
             }
 
+            if (toReturn.text().equals("register")) {
+                toReturn.type = TokenType.TOK_REGISTER_KEYWORD;
+                toReturn.endIndex = column;
+                return toReturn;
+            }
             /* Check for define style macro */
             toReturn.type = TokenType.TOK_IDENT;
             toReturn.endIndex = column;

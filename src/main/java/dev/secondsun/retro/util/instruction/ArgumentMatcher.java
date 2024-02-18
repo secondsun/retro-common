@@ -1,6 +1,7 @@
 package dev.secondsun.retro.util.instruction;
 
 import dev.secondsun.retro.util.Token;
+import dev.secondsun.retro.util.TokenAttribute;
 import dev.secondsun.retro.util.TokenType;
 
 import java.util.Arrays;
@@ -39,6 +40,7 @@ public sealed interface ArgumentMatcher {
                 return false;
             } else {
                 var token = in.remove(0);
+
                 var tokenText = token.text();
                 if (tokenText.startsWith("r") || tokenText.startsWith("R")) {
                     var actualRegister = Integer.parseInt(tokenText.substring(1));
@@ -48,7 +50,7 @@ public sealed interface ArgumentMatcher {
                         return actualRegister > -1 && actualRegister < 16;
                     }
                 }
-                return false;
+                return token.hasAttribute(TokenAttribute.REGISTER_LABEL);
             }
         }
     }
