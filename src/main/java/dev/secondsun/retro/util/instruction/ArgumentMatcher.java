@@ -50,7 +50,7 @@ public sealed interface ArgumentMatcher {
                         return actualRegister > -1 && actualRegister < 16;
                     }
                 }
-                return token.hasAttribute(TokenAttribute.REGISTER_LABEL);
+                return (specificRegister== -1) && token.hasAttribute(TokenAttribute.REGISTER_LABEL);
             }
         }
     }
