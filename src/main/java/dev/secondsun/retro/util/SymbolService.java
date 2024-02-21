@@ -56,7 +56,7 @@ public class SymbolService {
 
             // find functions. Functions are a Summersism
 
-            if (tokenized.size() == 2 && Objects.equals(tokenized.get(0).text(), "function")) {
+            if (tokenized.size() >= 2 && Objects.equals(tokenized.get(0).text(), "function")) {
                     var def = tokenized.get(1).text();
                     addDefinition(def,
                             new Location(file.uri(), idx, 0, line.length()));
