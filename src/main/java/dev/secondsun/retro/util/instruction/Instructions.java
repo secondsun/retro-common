@@ -2,7 +2,12 @@ package dev.secondsun.retro.util.instruction;
 
 import dev.secondsun.retro.util.vo.Tokens;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 public enum Instructions {
+
     JMP(new GSUInstruction("JMP", "Rn")),
     LJMP(new GSUInstruction("LJMP", "Rn")),
     BRA(new GSUInstruction("BRA", "E")),
@@ -134,6 +139,31 @@ public enum Instructions {
     XOR_REGISTER(new GSUInstruction("XOR", "Rn")),
 
     XOR_CONST(new GSUInstruction("XOR", "#n"));
+
+    public static final Map<String, Instructions> instructionLookupTable;
+
+    public static final List<Instructions> unconditionalJumpInstructions;
+    public static final List<Instructions> conditionalJumpInstructions;
+
+    static {
+        instructionLookupTable = new HashMap<>(Instructions.values().length);
+        for (Instructions i : Instructions.values()) {
+            instructionLookupTable.put(i.instruction.instruction, i);
+        }
+    }
+
+    static {
+        unconditionalJumpInstructions = List.of(
+                Instructions.JMP,Instructions.LJMP,Instructions.BRA, Instructions.IWT_JUMP
+        );
+
+        conditionalJumpInstructions = List.of(
+                Instructions.BGE,Instructions.BNE,Instructions.BCC,Instructions.BNE,Instructions.BCS,Instructions.BEQ,
+                Instructions.BLT,Instructions.BMI,Instructions.BMI,Instructions.BPL,Instructions.BVS,Instructions.BVC
+        );
+    }
+
+
     public final GSUInstruction instruction;
 
     Instructions(GSUInstruction gsuInstruction) {

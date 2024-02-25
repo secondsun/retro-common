@@ -9,32 +9,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static dev.secondsun.retro.util.instruction.Instructions.instructionLookupTable;
+
 public class GSUInstruction {
 
-    private final String instruction;
+    final String instruction;
 
-    private static final  Map<String, Instructions> instructionLookupTable;
-    static {
-        instructionLookupTable = new HashMap<>(Instructions.values().length);
-        for (Instructions i : Instructions.values()) {
-            instructionLookupTable.put(i.instruction.instruction, i);
-        }
-    }
 
     private final ArrayList<ArgumentMatcher> argumentMatchers;
 
-    public static final List<Instructions> unconditionalJumpInstructions;
-    public static final List<Instructions> conditionalJumpInstructions;
-    static {
-        unconditionalJumpInstructions = List.of(
-                Instructions.JMP,Instructions.LJMP,Instructions.BRA, Instructions.IWT_JUMP
-        );
-
-        conditionalJumpInstructions = List.of(
-                Instructions.BGE,Instructions.BNE,Instructions.BCC,Instructions.BNE,Instructions.BCS,Instructions.BEQ,
-                Instructions.BLT,Instructions.BMI,Instructions.BMI,Instructions.BPL,Instructions.BVS,Instructions.BVC
-                );
-    }
     public GSUInstruction(String instruction, String... argumentDefinitions) {
         this.instruction = instruction;
         this.argumentMatchers = new ArrayList<ArgumentMatcher>();
