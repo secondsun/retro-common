@@ -1,6 +1,7 @@
 package dev.secondsun.retro.util.vo;
 
 import java.net.URI;
+import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -10,7 +11,7 @@ import dev.secondsun.retro.util.Token;
 
 public class TokenizedFile {
     public static final TokenizedFile EMPTY = null;
-    private Map<Integer, Tokens> fileLines = new IdentityHashMap<>();
+    private Map<Integer, Tokens> fileLines = new HashMap<>();
     private Integer lineCount =0;
     public URI uri;
 

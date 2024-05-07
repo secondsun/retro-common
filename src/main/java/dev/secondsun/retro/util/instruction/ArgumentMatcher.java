@@ -42,7 +42,7 @@ public sealed interface ArgumentMatcher {
                 var token = in.remove(0);
 
                 var tokenText = token.text();
-                if (tokenText.startsWith("r") || tokenText.startsWith("R")) {
+                if (tokenText.matches("[rR]\\d+")) {
                     var actualRegister = Integer.parseInt(tokenText.substring(1));
                     if (specificRegister > -1) {
                         return specificRegister == actualRegister;
