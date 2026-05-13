@@ -63,13 +63,11 @@ public class FileService {
 
     public List<URI> find(URI file, URI... optionalSearchPaths) {
         
-        //We're allocating a copy of the localRepos and adding optionalSearchPaths
-        if (optionalSearchPaths != null && optionalSearchPaths.length >0){
 
-            
-        }
 
         var localRepos = new ArrayList<>(this.repositories);
+        //We're allocating a copy of the localRepos and adding optionalSearchPaths
+
         if (optionalSearchPaths != null && optionalSearchPaths.length >0) {
             localRepos.addAll(List.of(optionalSearchPaths).stream().map(Util::normalize).toList());
             

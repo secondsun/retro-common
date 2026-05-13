@@ -1,4 +1,4 @@
-package dev.secondsun.retro.util;
+package dev.secondsun.retro.util.vo;
 
 import java.net.URI;
 

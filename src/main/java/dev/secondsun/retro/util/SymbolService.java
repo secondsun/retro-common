@@ -3,6 +3,7 @@ package dev.secondsun.retro.util;
 import java.util.*;
 import java.util.stream.IntStream;
 
+import dev.secondsun.retro.util.vo.Location;
 import dev.secondsun.retro.util.vo.TokenizedFile;
 
 public class SymbolService {

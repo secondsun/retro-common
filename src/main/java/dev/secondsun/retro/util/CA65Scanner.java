@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.logging.Logger;
 
 import dev.secondsun.retro.util.vo.DotKeywords;
 import dev.secondsun.retro.util.vo.TokenizedFile;
@@ -48,6 +49,7 @@ public class CA65Scanner {
     public TokenizedFile tokenize(String ca65programText) {
         var toReturn = new TokenizedFile();
         ca65programText = Util.removeComments(ca65programText);
+        Logger.getAnonymousLogger().info(ca65programText);
         this.lines = Arrays.stream(ca65programText.split("\\n")).map(it->it + "\n").toList();
         this.line = 0;
         this.column = 0;

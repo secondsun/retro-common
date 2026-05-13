@@ -3,9 +3,9 @@ package dev.secondsun;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
-import java.util.Arrays;
 
 import dev.secondsun.retro.util.*;
+import dev.secondsun.retro.util.vo.Location;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 public class SymbolsTest {
     
-    private static final URI SYMBOLS_URI =URI.create("file:/C:/Users/secon/Projects/retro-common/target/test-classes/symbolTest/./symbol.s");
+    private static final URI SYMBOLS_URI =URI.create("file:/Users/summerspittman/Projects/retro-common/target/test-classes/symbolTest/./symbol.s");
 
     /**
      * A symbol is defined when it is the only element on a line and ends with a ":"
