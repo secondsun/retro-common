@@ -3,7 +3,6 @@ package dev.secondsun.retro.util.instruction;
 import dev.secondsun.retro.util.Token;
 import dev.secondsun.retro.util.TokenAttribute;
 import dev.secondsun.retro.util.TokenType;
-
 import java.util.Arrays;
 import java.util.List;
 
@@ -30,8 +29,8 @@ public sealed interface ArgumentMatcher {
                 }
                 return;
             }
-            throw new IllegalArgumentException(registerPattern + " is not a valid register pattern. Valid patterns are [rR][n\\d{1,2}]");
-
+            throw new IllegalArgumentException(
+                    registerPattern + " is not a valid register pattern. Valid patterns are [rR][n\\d{1,2}]");
         }
 
         @Override
@@ -50,7 +49,7 @@ public sealed interface ArgumentMatcher {
                         return actualRegister > -1 && actualRegister < 16;
                     }
                 }
-                return (specificRegister== -1) && token.hasAttribute(TokenAttribute.REGISTER_LABEL);
+                return (specificRegister == -1) && token.hasAttribute(TokenAttribute.REGISTER_LABEL);
             }
         }
     }
@@ -59,8 +58,7 @@ public sealed interface ArgumentMatcher {
      * Matches #nn (TOK_HAS, TOK_INTCON)
      */
     final class NumberMatcher implements ArgumentMatcher {
-        public NumberMatcher() {
-        }
+        public NumberMatcher() {}
 
         @Override
         public boolean match(List<Token> in) {
@@ -76,8 +74,7 @@ public sealed interface ArgumentMatcher {
     }
 
     final class AddressMatcher implements ArgumentMatcher {
-        public AddressMatcher(String pattern) {
-        }
+        public AddressMatcher(String pattern) {}
 
         @Override
         public boolean match(List<Token> in) {
@@ -86,17 +83,17 @@ public sealed interface ArgumentMatcher {
             } else {
                 var matches = true;
                 matches = matches && in.remove(0).type == TokenType.TOK_LPAREN;
-                matches = matches && Arrays.asList(TokenType.TOK_INTCON, TokenType.TOK_IDENT, TokenType.TOK_REGISTER).contains(in.remove(0).type);
+                matches = matches
+                        && Arrays.asList(TokenType.TOK_INTCON, TokenType.TOK_IDENT, TokenType.TOK_REGISTER)
+                                .contains(in.remove(0).type);
                 matches = matches && in.remove(0).type == TokenType.TOK_RPAREN;
                 return matches;
             }
-
         }
     }
 
     final class LabelMatcher implements ArgumentMatcher {
-        public LabelMatcher() {
-        }
+        public LabelMatcher() {}
 
         @Override
         public boolean match(List<Token> in) {
@@ -116,8 +113,6 @@ public sealed interface ArgumentMatcher {
             return new LabelMatcher();
         }
 
-        throw new IllegalStateException("Illegal argument definition:" + pattern) ;
-
+        throw new IllegalStateException("Illegal argument definition:" + pattern);
     }
-
 }

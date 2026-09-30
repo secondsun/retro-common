@@ -1,10 +1,10 @@
 package dev.secondsun;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import dev.secondsun.retro.util.CA65Scanner;
 import dev.secondsun.retro.util.TokenType;
 import org.junit.jupiter.api.Test;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class GrammarTest {
 
@@ -12,16 +12,16 @@ public class GrammarTest {
     public void testGeneralTokenization() {
         var program = """
             iwt r1 , #5
-            stw ( r1 ) 
+            stw ( r1 )
             bra next
             nop
 
-            iwt r2 , #5 
+            iwt r2 , #5
             stw ( r2 )
-            
+
             next:
-            iwt r3 , #5 
-            stw ( r3 ) 
+            iwt r3 , #5
+            stw ( r3 )
         """;
 
         var file = new CA65Scanner().tokenize(program);

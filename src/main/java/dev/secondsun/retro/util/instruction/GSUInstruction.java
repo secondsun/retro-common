@@ -1,20 +1,16 @@
 package dev.secondsun.retro.util.instruction;
+
+import static dev.secondsun.retro.util.instruction.Instructions.instructionLookupTable;
+
 import dev.secondsun.retro.util.Token;
 import dev.secondsun.retro.util.TokenAttribute;
 import dev.secondsun.retro.util.TokenType;
 import dev.secondsun.retro.util.vo.Tokens;
-
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import static dev.secondsun.retro.util.instruction.Instructions.instructionLookupTable;
 
 public class GSUInstruction {
 
     final String instruction;
-
 
     private final ArrayList<ArgumentMatcher> argumentMatchers;
 
@@ -39,7 +35,7 @@ public class GSUInstruction {
             return false;
         }
 
-        listTokens.remove(0);//consume instruction token
+        listTokens.remove(0); // consume instruction token
 
         var matches = true;
 
@@ -56,6 +52,7 @@ public class GSUInstruction {
     public static boolean isInstruction(Token firstToken) {
         return instructionLookupTable.get(firstToken.text().trim().toUpperCase()) != null;
     }
+
     public static void mark(Token firstToken) {
         var instruction = instructionLookupTable.get(firstToken.text().trim().toUpperCase());
         if (instruction != null) {

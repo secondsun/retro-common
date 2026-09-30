@@ -1,13 +1,11 @@
 package dev.secondsun.retro.util.instruction;
 
 import dev.secondsun.retro.util.vo.Tokens;
-
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 public enum Instructions {
-
     JMP(new GSUInstruction("JMP", "Rn")),
     LJMP(new GSUInstruction("LJMP", "Rn")),
     BRA(new GSUInstruction("BRA", "E")),
@@ -74,7 +72,6 @@ public enum Instructions {
     INC(new GSUInstruction("INC", "Rn")),
 
     IWT(new GSUInstruction("IWT", "Rn", "#x")),
-
 
     LDB(new GSUInstruction("LDB", "(Rm)")),
 
@@ -153,16 +150,23 @@ public enum Instructions {
     }
 
     static {
-        unconditionalJumpInstructions = List.of(
-                Instructions.JMP,Instructions.LJMP,Instructions.BRA, Instructions.IWT_JUMP
-        );
+        unconditionalJumpInstructions =
+                List.of(Instructions.JMP, Instructions.LJMP, Instructions.BRA, Instructions.IWT_JUMP);
 
         conditionalJumpInstructions = List.of(
-                Instructions.BGE,Instructions.BNE,Instructions.BCC,Instructions.BNE,Instructions.BCS,Instructions.BEQ,
-                Instructions.BLT,Instructions.BMI,Instructions.BMI,Instructions.BPL,Instructions.BVS,Instructions.BVC
-        );
+                Instructions.BGE,
+                Instructions.BNE,
+                Instructions.BCC,
+                Instructions.BNE,
+                Instructions.BCS,
+                Instructions.BEQ,
+                Instructions.BLT,
+                Instructions.BMI,
+                Instructions.BMI,
+                Instructions.BPL,
+                Instructions.BVS,
+                Instructions.BVC);
     }
-
 
     public final GSUInstruction instruction;
 
@@ -173,5 +177,4 @@ public enum Instructions {
     public boolean matches(Tokens tokens) {
         return this.instruction.matches(tokens);
     }
-
 }

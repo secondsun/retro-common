@@ -1,19 +1,16 @@
 package dev.secondsun.retro.util;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
-import java.util.logging.Logger;
-
 import dev.secondsun.retro.util.vo.DotKeywords;
 import dev.secondsun.retro.util.vo.TokenizedFile;
+import java.util.Arrays;
+import java.util.List;
+import java.util.logging.Logger;
 
 /**
  * Scanner for unassembled ca65 assembly code.
  * This scanner does *NOT* expand macros and
  * works with my X_GSU library.
- * 
+ *
  * Based on scanner.c from ca65 source code.
  * https://github.com/cc65/cc65/blob/master/src/ca65/scanner.c
  */
@@ -48,22 +45,30 @@ public class CA65Scanner {
 
     public TokenizedFile tokenize(String ca65programText) {
         var toReturn = new TokenizedFile();
-        ca65programText = Util.removeComments(ca65programText);
-        Logger.getAnonymousLogger().info(ca65programText);
-        this.lines = Arrays.stream(ca65programText.split("\\n")).map(it->it + "\n").toList();
+        var rawLines = Arrays.stream(ca65programText.split("\\r?\\n", -1)).toList();
+        toReturn.setRawLines(rawLines);
+
+        var strippedText = Util.removeComments(ca65programText);
+        Logger.getAnonymousLogger().info(strippedText);
+        this.lines =
+                Arrays.stream(strippedText.split("\\n")).map(it -> it + "\n").toList();
         this.line = 0;
         this.column = 0;
-        while (lines.get(line).isBlank()) {
+        while (line < lines.size() && lines.get(line).isBlank()) {
             line++;
         }
-        c = lines.get(line).charAt(column);
+        if (line < lines.size()) {
+            c = lines.get(line).charAt(column);
+        } else {
+            c = '\0';
+        }
         for (var line : lines) {
 
             if (!line.isBlank()) {
                 var lineNumber = this.line;
                 var tokens = tokenizeLine(line);
                 tokens.forEach(it -> it.lineNumber = lineNumber);
-                toReturn.addLine(line,lineNumber, tokens);
+                toReturn.addLine(line, lineNumber, tokens);
             }
         }
 
@@ -84,7 +89,6 @@ public class CA65Scanner {
             return toReturn;
         }
 
-
         /* Skip whitespace */
         if (isBlank(c)) {
 
@@ -93,12 +97,11 @@ public class CA65Scanner {
             } while (isBlank(c) && !isForcedEnd && !newLine);
         }
 
-        if (isForcedEnd) {// reached EOF above
+        if (isForcedEnd) { // reached EOF above
             toReturn.type = TokenType.TOK_EOF;
             toReturn.endIndex = 0;
             return toReturn;
         }
-
 
         /* Hex number or PC symbol? */
         if (c == '$') {
@@ -151,7 +154,6 @@ public class CA65Scanner {
                     if ((toReturn.intVal & 0x80000000) != 0) {
                         toReturn.intVal = 0;
                         return error("Overflow in binary number", toReturn);
-
                     }
                     toReturn.intVal = (toReturn.intVal << 1) + digitVal(c);
                     c = nextChar();
@@ -250,7 +252,6 @@ public class CA65Scanner {
 
                 /* Dot keyword, search for it */
                 toReturn.type = findDotKeyword(toReturn);
-
             }
             toReturn.endIndex = column;
             return toReturn;
@@ -341,7 +342,6 @@ public class CA65Scanner {
                     }
                 default:
                     break;
-
             }
 
             switch (Character.toUpperCase(toReturn.text().charAt(0))) {
@@ -367,8 +367,8 @@ public class CA65Scanner {
         }
 
         /* Ok, let's do the switch */
-        CharAgain: switch (c) {
-
+        CharAgain:
+        switch (c) {
             case '+':
                 toReturn.appendChar(c);
                 c = nextChar();
@@ -473,7 +473,6 @@ public class CA65Scanner {
                     default:
                         toReturn.type = TokenType.TOK_COLON;
                         break;
-
                 }
                 toReturn.endIndex = column;
                 return toReturn;
@@ -514,17 +513,20 @@ public class CA65Scanner {
             case ']':
                 c = nextChar();
                 toReturn.type = TokenType.TOK_RBRACK;
-                toReturn.endIndex = column;return toReturn;
+                toReturn.endIndex = column;
+                return toReturn;
 
             case '{':
                 c = nextChar();
                 toReturn.type = TokenType.TOK_LCURLY;
-                toReturn.endIndex = column;return toReturn;
+                toReturn.endIndex = column;
+                return toReturn;
 
             case '}':
                 c = nextChar();
                 toReturn.type = TokenType.TOK_RCURLY;
-                toReturn.endIndex = column;return toReturn;
+                toReturn.endIndex = column;
+                return toReturn;
 
             case '<':
                 c = nextChar();
@@ -540,17 +542,20 @@ public class CA65Scanner {
                 } else {
                     toReturn.type = TokenType.TOK_LT;
                 }
-                toReturn.endIndex = column;return toReturn;
+                toReturn.endIndex = column;
+                return toReturn;
 
             case '=':
                 c = nextChar();
                 toReturn.type = TokenType.TOK_EQ;
-                toReturn.endIndex = column;return toReturn;
+                toReturn.endIndex = column;
+                return toReturn;
 
             case '!':
                 c = nextChar();
                 toReturn.type = TokenType.TOK_BOOLNOT;
-                toReturn.endIndex = column;return toReturn;
+                toReturn.endIndex = column;
+                return toReturn;
 
             case '>':
                 c = nextChar();
@@ -563,42 +568,49 @@ public class CA65Scanner {
                 } else {
                     toReturn.type = TokenType.TOK_GT;
                 }
-                toReturn.endIndex = column;return toReturn;
+                toReturn.endIndex = column;
+                return toReturn;
 
             case '~':
                 c = nextChar();
                 toReturn.type = TokenType.TOK_NOT;
-                toReturn.endIndex = column;return toReturn;
+                toReturn.endIndex = column;
+                return toReturn;
 
-            case '\'': {
-                /* Always a character constant */
-                c = nextChar();
-                if (c == '\0' || isControl(c)) {
-                    error("Illegal character constant", toReturn);
-                    toReturn.endIndex = column;return toReturn;
-                }
-                toReturn.intVal = c;
-                toReturn.type = TokenType.TOK_CHARCON;
-                c = nextChar();
-                if (c != '\'') {
-                    error("Illegal character constant", toReturn);
-                    toReturn.endIndex = column;return toReturn;
-                } else {
+            case '\'':
+                {
+                    /* Always a character constant */
                     c = nextChar();
+                    if (c == '\0' || isControl(c)) {
+                        error("Illegal character constant", toReturn);
+                        toReturn.endIndex = column;
+                        return toReturn;
+                    }
+                    toReturn.intVal = c;
+                    toReturn.type = TokenType.TOK_CHARCON;
+                    c = nextChar();
+                    if (c != '\'') {
+                        error("Illegal character constant", toReturn);
+                        toReturn.endIndex = column;
+                        return toReturn;
+                    } else {
+                        c = nextChar();
+                    }
                 }
-            }
-            toReturn.endIndex = column;return toReturn;
+                toReturn.endIndex = column;
+                return toReturn;
 
             case '\"':
                 readStringConst('\"', toReturn);
                 toReturn.type = TokenType.TOK_STRCON;
-                toReturn.endIndex = column;return toReturn;
+                toReturn.endIndex = column;
+                return toReturn;
 
             case '\\':
                 break;
 
             case '\n':
-                //nextChar is handled in line setup
+                // nextChar is handled in line setup
                 toReturn.type = TokenType.TOK_SEP;
                 toReturn.endIndex = column;
                 return toReturn;
@@ -645,13 +657,10 @@ public class CA65Scanner {
                     case '"':
                         break;
                     case 't':
-
                         break;
                     case 'r':
-
                         break;
                     case 'n':
-
                         break;
                     case 'x':
                         c = nextChar();
@@ -663,7 +672,7 @@ public class CA65Scanner {
                                 break;
                             }
                         }
-                        /* FALLTHROUGH */
+                    /* FALLTHROUGH */
                     default:
                         error("Unsupported escape sequence in string constant", toReturn);
                         break;
@@ -679,7 +688,6 @@ public class CA65Scanner {
 
         /* Skip the trailing terminator */
         c = nextChar();
-
     }
 
     private boolean isControl(char c2) {
@@ -701,14 +709,10 @@ public class CA65Scanner {
             c = nextChar();
             token.endIndex = column;
         } while (isIdChar(c));
-
     }
 
     private boolean isIdChar(char c2) {
-        return isAlNum(c2) ||
-                (c2 == '_') ||
-                (c2 == '@') ||
-                (c2 == '$');
+        return isAlNum(c2) || (c2 == '_') || (c2 == '@') || (c2 == '$');
     }
 
     private boolean isAlNum(char c2) {
@@ -773,5 +777,4 @@ public class CA65Scanner {
     private boolean isBlank(char c) {
         return Character.isWhitespace(c);
     }
-
 }

@@ -2,6 +2,9 @@ target/
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
+.attach_pid*
+.junie/
+
 
 ### IntelliJ IDEA ###
 .idea/modules.xml

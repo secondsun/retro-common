@@ -1,18 +1,17 @@
 package dev.secondsun;
 
-import dev.secondsun.retro.util.instruction.Instructions;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import dev.secondsun.retro.util.CA65Scanner;
 import dev.secondsun.retro.util.GsuInstructionAttributeAdder;
 import dev.secondsun.retro.util.TokenAttribute;
 import dev.secondsun.retro.util.TokenType;
-
-import static org.junit.jupiter.api.Assertions.*;
+import dev.secondsun.retro.util.instruction.Instructions;
+import org.junit.jupiter.api.Test;
 
 public class GSUInstructionTest {
 
-    public void testLine(){
+    public void testLine() {
         var scanner = new CA65Scanner();
         var tokens = scanner.tokenize("NOP").getLineTokens(0);
         var checker = new GsuInstructionAttributeAdder();
@@ -40,8 +39,6 @@ public class GSUInstructionTest {
         new GsuInstructionAttributeAdder().applyAttributes(tokenized.getLineTokens(0));
         assertTrue(tokenized.getLineTokens(0).get(0).hasAttribute(TokenAttribute.GSU_INSTRUCTION));
         assertTrue(Instructions.IWT.matches(tokenized.getLine(0)));
-
-
     }
 
     @Test
@@ -53,14 +50,14 @@ public class GSUInstructionTest {
         new GsuInstructionAttributeAdder().applyAttributes(tokenized.getLineTokens(0));
         assertTrue(Instructions.BRA.matches(tokenized.getLine(0)));
         assertEquals(TokenType.TOK_IDENT, tokenized.getLineTokens(0).get(1).type);
-
     }
+
     @Test
     public void testTokenizationAndInstructionID() {
         var program = """
                 iwt r1, #5
                 stw (r1)
-                
+
                 """;
         var tokenized = new CA65Scanner().tokenize(program);
         new GsuInstructionAttributeAdder().applyAttributes(tokenized.getLineTokens(0));
@@ -78,5 +75,4 @@ public class GSUInstructionTest {
         assertEquals("r1", tokenized.getLineTokens(1).get(2).text());
         assertEquals(")", tokenized.getLineTokens(1).get(3).text());
     }
-
 }

@@ -1,8 +1,8 @@
 package dev.secondsun.retro.util;
 
 import java.util.HashMap;
-import java.util.Set;
 import java.util.HashSet;
+import java.util.Set;
 
 public class Token {
 
@@ -16,17 +16,16 @@ public class Token {
     private final HashMap metadata = new HashMap<>();
 
     private StringBuilder stringBuffer = new StringBuilder();
-    private Set<TokenAttribute> attributes = new HashSet<TokenAttribute>();  
-
+    private Set<TokenAttribute> attributes = new HashSet<TokenAttribute>();
 
     public Token addMetadata(Object key, Object value) {
-        metadata.put(key,value);
+        metadata.put(key, value);
         return this;
     }
 
     public <T> T getMetadata(Object key) {
         var toReturn = metadata.get(key);
-        if (toReturn != null){
+        if (toReturn != null) {
             return (T) metadata.get(key);
         } else {
             return null;
@@ -56,7 +55,6 @@ public class Token {
     public boolean hasAttribute(TokenAttribute gsuInstruction) {
         return attributes.contains(gsuInstruction);
     }
-
 
     public void addAttribute(TokenAttribute tokenAttribute) {
         attributes.add(tokenAttribute);

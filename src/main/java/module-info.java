@@ -5,5 +5,4 @@ open module dev.secondsun.retro.util {
     exports dev.secondsun.retro.util;
     exports dev.secondsun.retro.util.instruction;
     exports dev.secondsun.retro.util.vo;
-
 }
