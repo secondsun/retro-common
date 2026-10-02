@@ -28,6 +28,11 @@ jobs:
       - name: Verify Code Formatting (Spotless)
         run: ./mvnw spotless:check
 
+      - name: Import GPG Key
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+
       - name: Build and Test
         run: ./mvnw clean verify -DskipGpg=true
 
