@@ -219,5 +219,9 @@ public enum TokenType {
     TOK_REGISTER,
 
     TOK_REGISTER_KEYWORD,
+    TOK_FUNCTION,
+    TOK_ENDFUNCTION,
+    TOK_CALL,
+    TOK_RETURN,
     TOK_LASTPSEUDO
 }

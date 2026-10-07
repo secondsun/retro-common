@@ -164,6 +164,265 @@ public class SymbolsTest {
         assertEquals(expectedFunctionDoc, snippetSymbolService.getDocumentation("camera_lookAt"));
     }
 
+    @Test
+    public void twoFunctionsCanDefineSameLabelAndResolveByContext() {
+        var program = """
+                function foo
+                loop:
+                    bra loop
+                endfunction
+
+                function bar
+                loop:
+                    bra loop
+                endfunction
+                """;
+        var file = new CA65Scanner().tokenize(program);
+        file.uri = URI.create("file:///test/funcs.s");
+        var symbolService = new SymbolService();
+        symbolService.extractDefinitions(file);
+
+        // foo starts at line 0, loop at line 1, bra at line 2, endfunction at line 3
+        // bar starts at line 5, loop at line 6, bra at line 7, endfunction at line 8
+
+        // Line 2 is inside foo: loop must resolve to foo's loop (line 1)
+        var fooLoop = symbolService.getLocation("loop", file.uri, 2);
+        assertNotNull(fooLoop);
+        assertEquals(1, fooLoop.line());
+
+        // Line 7 is inside bar: loop must resolve to bar's loop (line 6)
+        var barLoop = symbolService.getLocation("loop", file.uri, 7);
+        assertNotNull(barLoop);
+        assertEquals(6, barLoop.line());
+
+        // Qualified resolution:
+        var qualFoo = symbolService.getLocation("foo::loop");
+        assertNotNull(qualFoo);
+        assertEquals(1, qualFoo.line());
+
+        var qualBar = symbolService.getLocation("bar::loop");
+        assertNotNull(qualBar);
+        assertEquals(6, qualBar.line());
+
+        // Multi-definition lookup:
+        var allLoops = symbolService.getLocations("loop");
+        assertEquals(2, allLoops.size());
+
+        // Context-aware multi-definition lookup:
+        var fooContextLoops = symbolService.getLocations("loop", file.uri, 2);
+        assertEquals(1, fooContextLoops.size());
+        assertEquals(1, fooContextLoops.get(0).line());
+
+        var barContextLoops = symbolService.getLocations("loop", file.uri, 7);
+        assertEquals(1, barContextLoops.size());
+        assertEquals(6, barContextLoops.get(0).line());
+    }
+
+    @Test
+    public void goToDefinitionUsageWithLocationAndToken() {
+        var program = """
+                function foo
+                loop:
+                    bra loop
+                endfunction
+
+                function bar
+                loop:
+                    bra loop
+                endfunction
+                """;
+        var file = new CA65Scanner().tokenize(program);
+        file.uri = URI.create("file:///test/lsp_test.s");
+        var symbolService = new SymbolService();
+        symbolService.extractDefinitions(file);
+
+        // Retro-LSP passes cursor Location or (uri, line)
+        var fooCursor = new Location(file.uri, 2, 8, 12);
+        var resolvedForFoo = symbolService.getLocation("loop", fooCursor);
+        assertNotNull(resolvedForFoo);
+        assertEquals(1, resolvedForFoo.line());
+
+        var barCursor = new Location(file.uri, 7, 8, 12);
+        var resolvedForBar = symbolService.getLocation("loop", barCursor);
+        assertNotNull(resolvedForBar);
+        assertEquals(6, resolvedForBar.line());
+
+        // Token-based lookup
+        var fooToken = file.getLineTokens(2).get(1); // loop token
+        assertEquals("loop", fooToken.text());
+        var tokenResolvedFoo = symbolService.getLocation(fooToken, file);
+        assertNotNull(tokenResolvedFoo);
+        assertEquals(1, tokenResolvedFoo.line());
+
+        var barToken = file.getLineTokens(7).get(1); // loop token
+        assertEquals("loop", barToken.text());
+        var tokenResolvedBar = symbolService.getLocation(barToken, file);
+        assertNotNull(tokenResolvedBar);
+        assertEquals(6, tokenResolvedBar.line());
+    }
+
+    @Test
+    public void functionParametersAndReturnVariableAreScoped() {
+        var program = """
+                function add_vectors v1, v2 : result
+                    lda v1
+                    add v2
+                    sta result
+                    return result
+                endfunction
+                """;
+        var file = new CA65Scanner().tokenize(program);
+        file.uri = URI.create("file:///test/params.s");
+        var symbolService = new SymbolService();
+        symbolService.extractDefinitions(file);
+
+        // Function itself is in global scope
+        var fnLoc = symbolService.getLocation("add_vectors");
+        assertNotNull(fnLoc);
+        assertEquals(0, fnLoc.line());
+
+        // Inside function (line 1), parameters and return var resolve to definition line (0)
+        var v1Loc = symbolService.getLocation("v1", file.uri, 1);
+        assertNotNull(v1Loc);
+        assertEquals(0, v1Loc.line());
+
+        var v2Loc = symbolService.getLocation("v2", file.uri, 2);
+        assertNotNull(v2Loc);
+        assertEquals(0, v2Loc.line());
+
+        var resLoc = symbolService.getLocation("result", file.uri, 3);
+        assertNotNull(resLoc);
+        assertEquals(0, resLoc.line());
+
+        // Outside function (line 10), parameters are not in scope
+        assertNull(symbolService.getLocation("v1", file.uri, 10));
+    }
+
+    @Test
+    public void scopeShadowingAndRootNamespaceResolution() {
+        var program = """
+                loop:
+                    nop
+
+                function foo
+                loop:
+                    bra loop
+                    bra ::loop
+                endfunction
+
+                function bar
+                    bra loop
+                endfunction
+                """;
+        var file = new CA65Scanner().tokenize(program);
+        file.uri = URI.create("file:///test/shadow.s");
+        var symbolService = new SymbolService();
+        symbolService.extractDefinitions(file);
+
+        // Outside functions: loop is global (line 0)
+        assertEquals(0, symbolService.getLocation("loop", file.uri, 0).line());
+
+        // Inside foo (line 5): loop resolves to local loop (line 4)
+        assertEquals(4, symbolService.getLocation("loop", file.uri, 5).line());
+
+        // Inside foo (line 6): ::loop explicitly resolves to global loop (line 0)
+        assertEquals(0, symbolService.getLocation("::loop", file.uri, 6).line());
+
+        // Inside bar (line 10): does not define loop, falls back to global loop (line 0)
+        assertEquals(0, symbolService.getLocation("loop", file.uri, 10).line());
+    }
+
+    @Test
+    public void contextAwareDocumentationForScopedSymbols() {
+        var program = """
+                function foo
+                ; Documentation for foo's loop
+                loop:
+                    bra loop
+                endfunction
+
+                function bar
+                ; Documentation for bar's loop
+                loop:
+                    bra loop
+                endfunction
+                """;
+        var file = new CA65Scanner().tokenize(program);
+        file.uri = URI.create("file:///test/docs.s");
+        var symbolService = new SymbolService();
+        symbolService.extractDefinitions(file);
+
+        assertTrue(symbolService.hasDocumentation("loop", file.uri, 3));
+        assertEquals("Documentation for foo's loop", symbolService.getDocumentation("loop", file.uri, 3));
+
+        assertTrue(symbolService.hasDocumentation("loop", file.uri, 9));
+        assertEquals("Documentation for bar's loop", symbolService.getDocumentation("loop", file.uri, 9));
+
+        assertEquals("Documentation for foo's loop", symbolService.getDocumentation("foo::loop"));
+        assertEquals("Documentation for bar's loop", symbolService.getDocumentation("bar::loop"));
+    }
+
+    @Test
+    public void procAndScopeBlockSupport() {
+        var program = """
+                .proc my_proc
+                local_sym:
+                    .scope inner
+                    inner_sym = 42
+                    .endscope
+                    rts
+                .endproc
+                """;
+        var file = new CA65Scanner().tokenize(program);
+        file.uri = URI.create("file:///test/proc.s");
+        var symbolService = new SymbolService();
+        symbolService.extractDefinitions(file);
+
+        // Inside inner scope (line 3)
+        assertEquals(3, symbolService.getLocation("inner_sym", file.uri, 3).line());
+        assertEquals(1, symbolService.getLocation("local_sym", file.uri, 3).line());
+
+        // Inside my_proc outside inner scope (line 5)
+        assertEquals(1, symbolService.getLocation("local_sym", file.uri, 5).line());
+        assertEquals(
+                3, symbolService.getLocation("inner::inner_sym", file.uri, 5).line());
+
+        // Outside my_proc
+        assertEquals(1, symbolService.getLocation("my_proc::local_sym").line());
+        assertEquals(3, symbolService.getLocation("my_proc::inner::inner_sym").line());
+    }
+
+    @Test
+    public void refreshingFileRemovesStaleDefinitions() {
+        var uri = URI.create("file:///test/refresh.s");
+        var programV1 = """
+                function foo
+                old_label:
+                    nop
+                endfunction
+                """;
+        var file1 = new CA65Scanner().tokenize(programV1);
+        file1.uri = uri;
+        var symbolService = new SymbolService();
+        symbolService.extractDefinitions(file1);
+
+        assertNotNull(symbolService.getLocation("old_label", uri, 1));
+
+        // Re-extracting with new code removes old_label
+        var programV2 = """
+                function foo
+                new_label:
+                    nop
+                endfunction
+                """;
+        var file2 = new CA65Scanner().tokenize(programV2);
+        file2.uri = uri;
+        symbolService.extractDefinitions(file2);
+
+        assertNull(symbolService.getLocation("old_label", uri, 1));
+        assertNotNull(symbolService.getLocation("new_label", uri, 1));
+    }
+
     private URI getTestFile(String string) {
         try {
             return new File(getClass()

@@ -355,6 +355,26 @@ public class CA65Scanner {
                     break;
             }
 
+            if (toReturn.text().equalsIgnoreCase("function")) {
+                toReturn.type = TokenType.TOK_FUNCTION;
+                toReturn.endIndex = column;
+                return toReturn;
+            }
+            if (toReturn.text().equalsIgnoreCase("endfunction")) {
+                toReturn.type = TokenType.TOK_ENDFUNCTION;
+                toReturn.endIndex = column;
+                return toReturn;
+            }
+            if (toReturn.text().equalsIgnoreCase("call")) {
+                toReturn.type = TokenType.TOK_CALL;
+                toReturn.endIndex = column;
+                return toReturn;
+            }
+            if (toReturn.text().equalsIgnoreCase("return")) {
+                toReturn.type = TokenType.TOK_RETURN;
+                toReturn.endIndex = column;
+                return toReturn;
+            }
             if (toReturn.text().equals("register")) {
                 toReturn.type = TokenType.TOK_REGISTER_KEYWORD;
                 toReturn.endIndex = column;
