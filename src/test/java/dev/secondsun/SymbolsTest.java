@@ -423,6 +423,122 @@ public class SymbolsTest {
         assertNotNull(symbolService.getLocation("new_label", uri, 1));
     }
 
+    @Test
+    public void globalRegisterVariables() {
+        var program = """
+                register input
+                register output = r6
+                """;
+        var file = new CA65Scanner().tokenize(program);
+        file.uri = URI.create("file:///test/register_global.s");
+        var symbolService = new SymbolService();
+        symbolService.extractDefinitions(file);
+
+        var inputLoc = symbolService.getLocation("input");
+        assertNotNull(inputLoc);
+        assertEquals(new Location(file.uri, 0, 8, 14), inputLoc);
+
+        var outputLoc = symbolService.getLocation("output");
+        assertNotNull(outputLoc);
+        assertEquals(new Location(file.uri, 1, 8, 15), outputLoc);
+    }
+
+    @Test
+    public void multipleRegisterDeclarationsPerLine() {
+        var program = """
+                register varA = r1, varB = r2, varC
+                """;
+        var file = new CA65Scanner().tokenize(program);
+        file.uri = URI.create("file:///test/register_multiple.s");
+        var symbolService = new SymbolService();
+        symbolService.extractDefinitions(file);
+
+        var varALoc = symbolService.getLocation("varA");
+        assertNotNull(varALoc);
+        assertEquals(new Location(file.uri, 0, 8, 13), varALoc);
+
+        var varBLoc = symbolService.getLocation("varB");
+        assertNotNull(varBLoc);
+        assertEquals(new Location(file.uri, 0, 19, 24), varBLoc);
+
+        var varCLoc = symbolService.getLocation("varC");
+        assertNotNull(varCLoc);
+        assertEquals(new Location(file.uri, 0, 30, 35), varCLoc);
+    }
+
+    @Test
+    public void registerVariablesInLexicalScopeAndQualifiedNames() {
+        var program = """
+                function calculate
+                    register temp = r3
+                    nop
+                endfunction
+
+                function process
+                    register temp = r4
+                    nop
+                endfunction
+                """;
+        var file = new CA65Scanner().tokenize(program);
+        file.uri = URI.create("file:///test/register_scopes.s");
+        var symbolService = new SymbolService();
+        symbolService.extractDefinitions(file);
+
+        // Inside calculate (line 2)
+        var calcTemp = symbolService.getLocation("temp", file.uri, 2);
+        assertNotNull(calcTemp);
+        assertEquals(1, calcTemp.line());
+
+        // Inside process (line 7)
+        var procTemp = symbolService.getLocation("temp", file.uri, 7);
+        assertNotNull(procTemp);
+        assertEquals(6, procTemp.line());
+
+        // Qualified lookups
+        var qualifiedCalc = symbolService.getLocation("calculate::temp");
+        assertNotNull(qualifiedCalc);
+        assertEquals(1, qualifiedCalc.line());
+
+        var qualifiedProc = symbolService.getLocation("process::temp");
+        assertNotNull(qualifiedProc);
+        assertEquals(6, qualifiedProc.line());
+    }
+
+    @Test
+    public void registerDocumentationComments() {
+        var program = """
+                ; Temporary counter
+                register counter = r0
+                """;
+        var file = new CA65Scanner().tokenize(program);
+        file.uri = URI.create("file:///test/register_doc.s");
+        var symbolService = new SymbolService();
+        symbolService.extractDefinitions(file);
+
+        assertTrue(symbolService.hasDocumentation("counter"));
+        assertEquals("Temporary counter", symbolService.getDocumentation("counter"));
+    }
+
+    @Test
+    public void registerCaseInsensitiveScanning() {
+        var program = """
+                REGISTER foo = r1
+                Register bar = r2
+                """;
+        var file = new CA65Scanner().tokenize(program);
+        file.uri = URI.create("file:///test/register_case.s");
+        var symbolService = new SymbolService();
+        symbolService.extractDefinitions(file);
+
+        var fooLoc = symbolService.getLocation("foo");
+        assertNotNull(fooLoc);
+        assertEquals(0, fooLoc.line());
+
+        var barLoc = symbolService.getLocation("bar");
+        assertNotNull(barLoc);
+        assertEquals(1, barLoc.line());
+    }
+
     private URI getTestFile(String string) {
         try {
             return new File(getClass()

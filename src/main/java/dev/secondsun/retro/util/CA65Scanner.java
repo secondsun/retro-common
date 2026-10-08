@@ -375,7 +375,7 @@ public class CA65Scanner {
                 toReturn.endIndex = column;
                 return toReturn;
             }
-            if (toReturn.text().equals("register")) {
+            if (toReturn.text().equalsIgnoreCase("register")) {
                 toReturn.type = TokenType.TOK_REGISTER_KEYWORD;
                 toReturn.endIndex = column;
                 return toReturn;

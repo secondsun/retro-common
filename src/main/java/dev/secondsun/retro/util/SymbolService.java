@@ -528,6 +528,37 @@ public class SymbolService {
                 continue;
             }
 
+            // Register variable declarations: register var1 [= rX], var2 [= rY]
+            if (first.type == TokenType.TOK_REGISTER_KEYWORD || "register".equalsIgnoreCase(first.text())) {
+                Scope current = scopeStack.peek();
+                for (int tIdx = 1; tIdx < tokenized.size(); tIdx++) {
+                    Token t = tokenized.get(tIdx);
+                    if (t.type == TokenType.TOK_IDENT || t.type == TokenType.TOK_LOCAL_IDENT) {
+                        String stringToken = t.text();
+                        var loc = new Location(fileUri, idx, t.getStartIndex(), t.getEndIndex());
+                        current.addDefinition(stringToken, loc);
+                        if (current.type() == ScopeType.FILE || current.type() == ScopeType.GLOBAL) {
+                            globalScope.addDefinition(stringToken, loc);
+                        } else if (!current.name().isEmpty()) {
+                            recordDefinition(current.name() + "::" + stringToken, loc);
+                        }
+                        recordDefinition(stringToken, loc);
+                        extractDoc(file, idx, stringToken, current);
+                        // Skip optional assignment "= <register/value>"
+                        if (tIdx + 1 < tokenized.size()
+                                && (tokenized.get(tIdx + 1).type == TokenType.TOK_EQ
+                                        || tokenized.get(tIdx + 1).type == TokenType.TOK_ASSIGN
+                                        || "=".equals(tokenized.get(tIdx + 1).text()))) {
+                            tIdx++; // Skip '='
+                            if (tIdx + 1 < tokenized.size()) {
+                                tIdx++; // Skip assigned register/value
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+
             // 3. Struct fields inside a STRUCT scope
             if (scopeStack.peek().type() == ScopeType.STRUCT) {
                 if (tokenized.size() > 1 && tokenized.get(0).type == TokenType.TOK_IDENT) {
