@@ -4,7 +4,6 @@ import dev.secondsun.retro.util.vo.DotKeywords;
 import dev.secondsun.retro.util.vo.TokenizedFile;
 import java.util.Arrays;
 import java.util.List;
-import java.util.logging.Logger;
 
 /**
  * Scanner for unassembled ca65 assembly code.
@@ -49,7 +48,6 @@ public class CA65Scanner {
         toReturn.setRawLines(rawLines);
 
         var strippedText = Util.removeComments(ca65programText);
-        Logger.getAnonymousLogger().info(strippedText);
         this.lines =
                 Arrays.stream(strippedText.split("\\n")).map(it -> it + "\n").toList();
         this.line = 0;

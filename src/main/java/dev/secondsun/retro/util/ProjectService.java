@@ -9,8 +9,9 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.stream.Collectors;
 
 /**
  * This service is used for initializing the root directory.
@@ -21,9 +22,12 @@ import java.util.stream.Collectors;
  */
 public class ProjectService {
 
+    private static final Logger LOG = Logger.getLogger(ProjectService.class.getName());
+
     private FileService fileService;
     private SymbolService symbolService;
-    Map<URI, TokenizedFile> files = new HashMap<>();
+    Map<URI, TokenizedFile> files = new ConcurrentHashMap<>();
+    private final java.util.Set<URI> visitedDirs = ConcurrentHashMap.newKeySet();
 
     public ProjectService(FileService fileService, SymbolService symbolService) {
         this.fileService = fileService;
@@ -35,7 +39,10 @@ public class ProjectService {
      *
      * @param directory URI of path to directory
      */
-    public void includeDir(URI directory) {
+    public synchronized void includeDir(URI directory) {
+        if (directory == null) {
+            return;
+        }
 
         directory = normalize(directory);
         this.fileService.addSearchPath(directory);
@@ -43,6 +50,9 @@ public class ProjectService {
     }
 
     private void _includeDir(URI directory) {
+        if (!visitedDirs.add(directory)) {
+            return;
+        }
         // Include everything in workspace root
         var workspacePath = Path.of(directory);
 
@@ -61,65 +71,114 @@ public class ProjectService {
             return;
         }
 
+        var includeDirsToScan = new ArrayList<URI>();
+
         Arrays.stream(thing).forEach((file) -> {
             var fileUri = normalize(file.toPath().toUri());
 
             if (!files.containsKey(fileUri)) {
+                try {
+                    var tokenized = fileService.readLines(fileUri);
+                    if (tokenized != null && tokenized != TokenizedFile.EMPTY) {
+                        files.put(fileUri, tokenized);
+                        symbolService.extractDefinitions(tokenized);
 
-                files.computeIfAbsent(fileUri, (key) -> {
-                    try {
-                        var lines = fileService.readLines(fileUri);
-                        return lines;
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
+                        tokenized.forEach((line, tokens) -> {
+                            if (Util.isIncludeDirective(tokens.line().trim())
+                                    && tokens.tokens().size() > 1) {
+                                var includeTarget = tokens.tokens()
+                                        .get(1)
+                                        .text()
+                                        .replace("\"", "")
+                                        .trim();
+                                for (var foundUri : fileService.find(URI.create("./" + includeTarget))) {
+                                    var f = new File(foundUri);
+                                    if (f.exists() && f.getParentFile() != null) {
+                                        includeDirsToScan.add(f.getParentFile()
+                                                .getAbsoluteFile()
+                                                .toURI());
+                                    }
+                                }
+                            }
+                        });
                     }
-                });
-
-                files.get(fileUri).forEach((line, tokens) -> {
-                    if (Util.isIncludeDirective(tokens.line().trim())) {
-                        fileService
-                                .find(URI.create(("./"
-                                        + (tokens.tokens()
-                                                .get(1)
-                                                .text()
-                                                .replace("\"", "")
-                                                .trim()))))
-                                .stream()
-                                .map(File::new)
-                                .filter(File::exists)
-                                .map(it -> it.getParentFile().getAbsoluteFile().toURI())
-                                .forEach(this::includeDir);
-                    }
-                });
-
-                symbolService.extractDefinitions(files.get(fileUri));
+                } catch (IOException e) {
+                    LOG.log(Level.WARNING, "Failed to read lines for " + fileUri, e);
+                }
             }
         });
 
-        Arrays.stream(workspacePath.toFile().listFiles(file -> file.isDirectory()))
-                .map(File::toURI)
-                .forEach(uri -> this._includeDir(uri));
-    }
+        for (var incDir : includeDirsToScan) {
+            includeDir(incDir);
+        }
 
-    public void refreshFileContents(URI uri) {
-        var fileUri = normalize(uri);
-        try {
-            files.put(fileUri, fileService.readLines(fileUri));
-            symbolService.extractDefinitions(files.get(fileUri));
-        } catch (IOException e) {
-            Logger.getAnonymousLogger().severe(e.getMessage());
+        var subDirs = workspacePath.toFile().listFiles(File::isDirectory);
+        if (subDirs != null) {
+            Arrays.stream(subDirs)
+                    .filter(dir -> !dir.getName().startsWith(".")
+                            && !dir.getName().equals("node_modules")
+                            && !dir.getName().equals("target")
+                            && !dir.getName().equals("dist")
+                            && !dir.getName().equals("out")
+                            && !dir.getName().equals("build"))
+                    .map(File::toURI)
+                    .forEach(this::_includeDir);
         }
     }
 
+    public synchronized void refreshFileContents(URI uri) {
+        if (uri == null) {
+            return;
+        }
+        var fileUri = normalize(uri);
+        try {
+            var tokenized = fileService.readLines(fileUri);
+            if (tokenized != null && tokenized != TokenizedFile.EMPTY) {
+                files.put(fileUri, tokenized);
+                symbolService.extractDefinitions(tokenized);
+            }
+        } catch (IOException e) {
+            LOG.log(Level.SEVERE, e.getMessage(), e);
+        }
+    }
+
+    public synchronized void updateFileContents(URI uri, String text) {
+        if (uri == null || text == null) {
+            return;
+        }
+        var fileUri = normalize(uri);
+        try {
+            var tokenized = new CA65Scanner().tokenize(text);
+            tokenized.uri = fileUri;
+            files.put(fileUri, tokenized);
+            symbolService.extractDefinitions(tokenized);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Failed to tokenize and update file contents for " + fileUri, e);
+        }
+    }
+
+    public synchronized void removeFile(URI uri) {
+        if (uri == null) {
+            return;
+        }
+        var fileUri = normalize(uri);
+        files.remove(fileUri);
+        symbolService.removeFile(fileUri);
+    }
+
+    public FileService getFileService() {
+        return fileService;
+    }
+
+    public SymbolService getSymbolService() {
+        return symbolService;
+    }
+
     public TokenizedFile getFileContents(URI uri) {
-        uri = normalize(uri);
-        var lines = files.get(uri);
+        var normalizedUri = normalize(uri);
+        var lines = files.get(normalizedUri);
         if (lines == null) {
-            Logger.getAnonymousLogger().warning(uri.getRawSchemeSpecificPart() + " could not be found in read files.");
-            Logger.getAnonymousLogger()
-                    .warning(files.keySet().stream()
-                            .map(URI::getRawSchemeSpecificPart)
-                            .collect(Collectors.joining("\t\n")));
+            LOG.fine(() -> normalizedUri.getRawSchemeSpecificPart() + " could not be found in read files.");
             return TokenizedFile.EMPTY;
         }
         return lines;

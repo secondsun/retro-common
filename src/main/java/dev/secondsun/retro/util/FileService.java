@@ -12,22 +12,34 @@ import java.util.logging.Logger;
 public class FileService {
 
     private Set<URI> repositories = new HashSet<>();
-    private static final Logger LOG = Logger.getAnonymousLogger();
+    private static final Logger LOG = Logger.getLogger(FileService.class.getName());
 
     public FileService addSearchPath(URI repoURI) {
         if (Path.of(repoURI).toFile().exists()) {
 
             repositories.add(Util.normalize(repoURI));
         } else {
-            System.out.println(repoURI + " does not exist.");
+            LOG.fine(() -> repoURI + " does not exist.");
         }
         return this;
     }
 
     public TokenizedFile readLines(URI fileUri) throws IOException {
+        if (fileUri == null) {
+            return TokenizedFile.EMPTY;
+        }
 
-        var possibleFile = new File(fileUri.getRawSchemeSpecificPart());
-        if (possibleFile.exists()) {
+        File possibleFile = null;
+        try {
+            possibleFile = Path.of(fileUri).toFile();
+        } catch (Exception e) {
+            var raw = fileUri.getRawSchemeSpecificPart();
+            if (raw != null) {
+                possibleFile = new File(raw);
+            }
+        }
+
+        if (possibleFile != null && possibleFile.exists() && possibleFile.isFile()) {
             try (var stream = new FileInputStream(possibleFile)) {
                 var fileByLinesAsString = Util.toString(stream);
                 var tokenized = new CA65Scanner().tokenize(fileByLinesAsString);
@@ -38,8 +50,14 @@ public class FileService {
 
         final var fileUri2 = fileUri;
         final var fileToRead = repositories.stream()
-                .map(it -> Path.of(it).resolve(fileUri2.toString()).toFile())
-                .filter(File::exists)
+                .map(it -> {
+                    try {
+                        return Path.of(it).resolve(fileUri2.toString()).toFile();
+                    } catch (Exception e) {
+                        return null;
+                    }
+                })
+                .filter(it -> it != null && it.exists() && it.isFile())
                 .findFirst();
 
         if (fileToRead.isPresent()) {
