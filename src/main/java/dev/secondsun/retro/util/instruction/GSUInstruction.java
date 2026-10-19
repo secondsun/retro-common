@@ -10,7 +10,7 @@ import java.util.ArrayList;
 
 public class GSUInstruction {
 
-    final String instruction;
+    public final String instruction;
 
     private final ArrayList<ArgumentMatcher> argumentMatchers;
 
@@ -46,7 +46,7 @@ public class GSUInstruction {
             }
         }
 
-        return matches;
+        return matches && listTokens.isEmpty();
     }
 
     public static boolean isInstruction(Token firstToken) {

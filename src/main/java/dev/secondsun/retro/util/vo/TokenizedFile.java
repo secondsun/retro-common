@@ -1,8 +1,11 @@
 package dev.secondsun.retro.util.vo;
 
 import dev.secondsun.retro.util.Token;
+import dev.secondsun.retro.util.diagnostic.SyntaxDiagnostic;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +17,7 @@ public class TokenizedFile {
     private Integer lineCount = 0;
     public URI uri;
     private List<String> rawLines = new ArrayList<>();
+    private final List<SyntaxDiagnostic> diagnostics = new ArrayList<>();
 
     public int textLines() {
         return Math.max(lineCount + 1, rawLines.size());
@@ -71,5 +75,25 @@ public class TokenizedFile {
 
     public Tokens getLine(int idx) {
         return fileLines.get(idx);
+    }
+
+    public List<SyntaxDiagnostic> getDiagnostics() {
+        return Collections.unmodifiableList(diagnostics);
+    }
+
+    public void addDiagnostic(SyntaxDiagnostic diagnostic) {
+        if (diagnostic != null) {
+            diagnostics.add(diagnostic);
+        }
+    }
+
+    public void addDiagnostics(Collection<SyntaxDiagnostic> newDiagnostics) {
+        if (newDiagnostics != null) {
+            diagnostics.addAll(newDiagnostics);
+        }
+    }
+
+    public void clearDiagnostics() {
+        diagnostics.clear();
     }
 }

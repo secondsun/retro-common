@@ -52,6 +52,8 @@ public class CA65Scanner {
                 Arrays.stream(strippedText.split("\\n")).map(it -> it + "\n").toList();
         this.line = 0;
         this.column = 0;
+        this.isForcedEnd = false;
+        this.newLine = false;
         while (line < lines.size() && lines.get(line).isBlank()) {
             line++;
         }
