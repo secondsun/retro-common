@@ -456,11 +456,11 @@ public class SymbolsTest {
 
     var inputLoc = symbolService.getLocation("input");
     assertNotNull(inputLoc);
-    assertEquals(new Location(file.uri, 0, 8, 14), inputLoc);
+    assertEquals(new Location(file.uri, 0, 9, 14), inputLoc);
 
     var outputLoc = symbolService.getLocation("output");
     assertNotNull(outputLoc);
-    assertEquals(new Location(file.uri, 1, 8, 15), outputLoc);
+    assertEquals(new Location(file.uri, 1, 9, 15), outputLoc);
   }
 
   @Test
@@ -476,15 +476,15 @@ public class SymbolsTest {
 
     var varALoc = symbolService.getLocation("varA");
     assertNotNull(varALoc);
-    assertEquals(new Location(file.uri, 0, 8, 13), varALoc);
+    assertEquals(new Location(file.uri, 0, 9, 13), varALoc);
 
     var varBLoc = symbolService.getLocation("varB");
     assertNotNull(varBLoc);
-    assertEquals(new Location(file.uri, 0, 19, 24), varBLoc);
+    assertEquals(new Location(file.uri, 0, 20, 24), varBLoc);
 
     var varCLoc = symbolService.getLocation("varC");
     assertNotNull(varCLoc);
-    assertEquals(new Location(file.uri, 0, 30, 35), varCLoc);
+    assertEquals(new Location(file.uri, 0, 31, 35), varCLoc);
   }
 
   @Test

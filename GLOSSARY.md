@@ -20,3 +20,20 @@ _Avoid_: Scope checker, block matcher
 The analyzer that checks operand counts and syntactic structure against defined opcode signatures.
 _Avoid_: Opcode parser, instruction checker
 
+**Workspace Index**:
+The unified entry point and persistent index coordinating file tokenization, buffer precedence, workspace sandbox confinement, on-demand directory inclusion, and symbol resolution.
+_Avoid_: Project cache, file store, multi-service coordinator
+
+**Buffer Precedence**:
+The invariant ensuring active, open in-memory editor buffers transparently supersede on-disk file state for all parsing, analysis, and symbol resolution queries.
+_Avoid_: Dirty cache override, buffer shadow
+
+**Workspace Sandbox**:
+The filesystem boundary enforced around the designated workspace path preventing file resolution, inclusion, or symbol extraction from escaping outside the permitted root directory.
+_Avoid_: Chroot, jail, restricted folder
+
+**Transient Snippet**:
+An ephemeral, isolated tokenized code fragment evaluated in-memory without mutating persistent project files or global symbol index state.
+_Avoid_: Mock file, temporary buffer, ad-hoc string parse
+
+

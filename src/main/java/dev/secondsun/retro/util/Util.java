@@ -45,9 +45,11 @@ public final class Util {
   }
 
   public static Optional<Token> getTokenAt(List<Token> lineTokens, int position) {
-
+    if (lineTokens == null) {
+      return Optional.empty();
+    }
     return lineTokens.stream()
-        .filter(token -> token.getStartIndex() < position && token.getEndIndex() >= position)
+        .filter(token -> token.getStartIndex() <= position && token.getEndIndex() >= position)
         .findFirst();
   }
 

@@ -79,9 +79,9 @@ public class CA65Scanner {
 
   private Token nextRawToken() {
 
-    Token toReturn = new Token();
-    toReturn.startIndex = column;
     if (isForcedEnd) {
+      Token toReturn = new Token();
+      toReturn.startIndex = Math.max(0, column);
       toReturn.type = TokenType.TOK_EOF;
       toReturn.endIndex = 0;
       return toReturn;
@@ -94,6 +94,9 @@ public class CA65Scanner {
         c = nextChar();
       } while (isBlank(c) && !isForcedEnd && !newLine);
     }
+
+    Token toReturn = new Token();
+    toReturn.startIndex = Math.max(0, column);
 
     if (isForcedEnd) { // reached EOF above
       toReturn.type = TokenType.TOK_EOF;
