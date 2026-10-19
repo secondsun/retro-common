@@ -14,51 +14,53 @@ import java.net.URI;
 import org.junit.jupiter.api.Test;
 
 public class FirstTest {
-    /**
-     * Confirm that tokens from a source file can be parsed
-     *
-     * @throws Exception
-     */
-    @Test
-    public void printTestSgs() throws Exception {
-        CA65Scanner grammar = new CA65Scanner();
+  /**
+   * Confirm that tokens from a source file can be parsed
+   *
+   * @throws Exception
+   */
+  @Test
+  public void printTestSgs() throws Exception {
+    CA65Scanner grammar = new CA65Scanner();
 
-        var sgsProgram = Util.toString(UtilTest.class.getClassLoader().getResourceAsStream("libSFX.i"));
-        var tf = grammar.tokenize(sgsProgram);
-        tf.forEach((index, line) -> {
-            var lineTokens = line.tokens();
-            System.out.println(line);
-            for (int i = 0; i < lineTokens.size(); i++) {
-                Token token = lineTokens.get(i);
-                System.out.println("Token from " + token.getStartIndex() + " to " + token.getEndIndex()
-                        + " with scopes " + token.getType().name());
-            }
+    var sgsProgram = Util.toString(UtilTest.class.getClassLoader().getResourceAsStream("libSFX.i"));
+    var tf = grammar.tokenize(sgsProgram);
+    tf.forEach(
+        (index, line) -> {
+          var lineTokens = line.tokens();
+          System.out.println(line);
+          for (int i = 0; i < lineTokens.size(); i++) {
+            Token token = lineTokens.get(i);
+            System.out.println(
+                "Token from "
+                    + token.getStartIndex()
+                    + " to "
+                    + token.getEndIndex()
+                    + " with scopes "
+                    + token.getType().name());
+          }
         });
-    }
+  }
 
-    @Test
-    public void projectServiceinit() throws Exception {
-        var rootUri = getTestDirURI();
-        var fileService = new FileService();
+  @Test
+  public void projectServiceinit() throws Exception {
+    var rootUri = getTestDirURI();
+    var fileService = new FileService();
 
-        var symbolService = new SymbolService();
-        var projectService = new ProjectService(fileService, symbolService);
-        projectService.includeDir(rootUri);
+    var symbolService = new SymbolService();
+    var projectService = new ProjectService(fileService, symbolService);
+    projectService.includeDir(rootUri);
 
-        assertNotNull(projectService.getFileContents(getTestFile("test.sgs")));
-    }
+    assertNotNull(projectService.getFileContents(getTestFile("test.sgs")));
+  }
 
-    private URI getTestFile(String string) {
-        return new File(getClass()
-                        .getClassLoader()
-                        .getResource("includeTest/" + string)
-                        .getFile())
-                .toURI();
-    }
+  private URI getTestFile(String string) {
+    return new File(getClass().getClassLoader().getResource("includeTest/" + string).getFile())
+        .toURI();
+  }
 
-    private URI getTestDirURI() throws IOException {
-        File file = new File(
-                getClass().getClassLoader().getResource("includeTest/test.sgs").getFile());
-        return file.getParentFile().getCanonicalFile().toPath().toUri();
-    }
+  private URI getTestDirURI() throws IOException {
+    File file = new File(getClass().getClassLoader().getResource("includeTest/test.sgs").getFile());
+    return file.getParentFile().getCanonicalFile().toPath().toUri();
+  }
 }

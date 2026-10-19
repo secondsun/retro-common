@@ -1,11 +1,9 @@
 package dev.secondsun.retro.util.diagnostic;
 
-/**
- * Severity level of a diagnostic finding.
- */
+/** Severity level of a diagnostic finding. */
 public enum DiagnosticSeverity {
-    ERROR,
-    WARNING,
-    INFO,
-    HINT
+  ERROR,
+  WARNING,
+  INFO,
+  HINT
 }

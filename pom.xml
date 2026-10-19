@@ -173,7 +173,10 @@
                 <version>3.10.3</version>
                 <configuration>
                     <java>
-                        <palantirJavaFormat/>
+                        <googleJavaFormat>
+                            <version>1.36.1</version>
+                            <style>GOOGLE</style>
+                        </googleJavaFormat>
                         <removeUnusedImports/>
                     </java>
                 </configuration>

@@ -10,53 +10,53 @@ import java.util.ArrayList;
 
 public class GSUInstruction {
 
-    public final String instruction;
+  public final String instruction;
 
-    private final ArrayList<ArgumentMatcher> argumentMatchers;
+  private final ArrayList<ArgumentMatcher> argumentMatchers;
 
-    public GSUInstruction(String instruction, String... argumentDefinitions) {
-        this.instruction = instruction;
-        this.argumentMatchers = new ArrayList<ArgumentMatcher>();
-        for (int i = 0; i < argumentDefinitions.length; i++) {
-            var argument = argumentDefinitions[i];
-            argumentMatchers.add(ArgumentMatcher.create(argument));
-        }
+  public GSUInstruction(String instruction, String... argumentDefinitions) {
+    this.instruction = instruction;
+    this.argumentMatchers = new ArrayList<ArgumentMatcher>();
+    for (int i = 0; i < argumentDefinitions.length; i++) {
+      var argument = argumentDefinitions[i];
+      argumentMatchers.add(ArgumentMatcher.create(argument));
+    }
+  }
+
+  public boolean matches(Tokens tokenizedLine) {
+    var listTokens = new ArrayList<>(tokenizedLine.tokens());
+
+    if (listTokens.isEmpty()) {
+      return false;
     }
 
-    public boolean matches(Tokens tokenizedLine) {
-        var listTokens = new ArrayList<>(tokenizedLine.tokens());
-
-        if (listTokens.isEmpty()) {
-            return false;
-        }
-
-        var firstToken = listTokens.getFirst();
-        if (!firstToken.text().equalsIgnoreCase(this.instruction)) {
-            return false;
-        }
-
-        listTokens.remove(0); // consume instruction token
-
-        var matches = true;
-
-        for (ArgumentMatcher matcher : argumentMatchers) {
-            matches = matches && matcher.match(listTokens);
-            if (listTokens.size() > 0) {
-                matches = matches && listTokens.remove(0).type == TokenType.TOK_COMMA;
-            }
-        }
-
-        return matches && listTokens.isEmpty();
+    var firstToken = listTokens.getFirst();
+    if (!firstToken.text().equalsIgnoreCase(this.instruction)) {
+      return false;
     }
 
-    public static boolean isInstruction(Token firstToken) {
-        return instructionLookupTable.get(firstToken.text().trim().toUpperCase()) != null;
+    listTokens.remove(0); // consume instruction token
+
+    var matches = true;
+
+    for (ArgumentMatcher matcher : argumentMatchers) {
+      matches = matches && matcher.match(listTokens);
+      if (listTokens.size() > 0) {
+        matches = matches && listTokens.remove(0).type == TokenType.TOK_COMMA;
+      }
     }
 
-    public static void mark(Token firstToken) {
-        var instruction = instructionLookupTable.get(firstToken.text().trim().toUpperCase());
-        if (instruction != null) {
-            firstToken.addAttribute(TokenAttribute.GSU_INSTRUCTION);
-        }
+    return matches && listTokens.isEmpty();
+  }
+
+  public static boolean isInstruction(Token firstToken) {
+    return instructionLookupTable.get(firstToken.text().trim().toUpperCase()) != null;
+  }
+
+  public static void mark(Token firstToken) {
+    var instruction = instructionLookupTable.get(firstToken.text().trim().toUpperCase());
+    if (instruction != null) {
+      firstToken.addAttribute(TokenAttribute.GSU_INSTRUCTION);
     }
+  }
 }

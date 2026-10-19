@@ -10,12 +10,13 @@ import org.junit.jupiter.api.Test;
 
 public class DuplicateSymbolValidatorTest {
 
-    private final CA65Scanner scanner = new CA65Scanner();
-    private final DuplicateSymbolValidator validator = new DuplicateSymbolValidator();
+  private final CA65Scanner scanner = new CA65Scanner();
+  private final DuplicateSymbolValidator validator = new DuplicateSymbolValidator();
 
-    @Test
-    public void testUniqueLabelsAndFunctions() {
-        var code = """
+  @Test
+  public void testUniqueLabelsAndFunctions() {
+    var code =
+        """
                 main:
                     nop
                 loop:
@@ -24,45 +25,48 @@ public class DuplicateSymbolValidatorTest {
                     return
                 endfunction
                 """;
-        var file = scanner.tokenize(code);
-        List<SyntaxDiagnostic> diags = validator.validate(file);
-        assertTrue(diags.isEmpty(), "Expected no duplicate diagnostics, found: " + diags);
-    }
+    var file = scanner.tokenize(code);
+    List<SyntaxDiagnostic> diags = validator.validate(file);
+    assertTrue(diags.isEmpty(), "Expected no duplicate diagnostics, found: " + diags);
+  }
 
-    @Test
-    public void testDuplicateGlobalLabels() {
-        var code = """
+  @Test
+  public void testDuplicateGlobalLabels() {
+    var code =
+        """
                 my_label:
                     nop
                 my_label:
                     nop
                 """;
-        var file = scanner.tokenize(code);
-        List<SyntaxDiagnostic> diags = validator.validate(file);
-        assertEquals(1, diags.size());
-        assertEquals("DUPLICATE_SYMBOL", diags.get(0).code());
-        assertTrue(diags.get(0).message().contains("my_label"));
-    }
+    var file = scanner.tokenize(code);
+    List<SyntaxDiagnostic> diags = validator.validate(file);
+    assertEquals(1, diags.size());
+    assertEquals("DUPLICATE_SYMBOL", diags.get(0).code());
+    assertTrue(diags.get(0).message().contains("my_label"));
+  }
 
-    @Test
-    public void testDuplicateCheapLocalLabelsUnderSameScope() {
-        var code = """
+  @Test
+  public void testDuplicateCheapLocalLabelsUnderSameScope() {
+    var code =
+        """
                 my_label:
                 @loop:
                     nop
                 @loop:
                     bra @loop
                 """;
-        var file = scanner.tokenize(code);
-        List<SyntaxDiagnostic> diags = validator.validate(file);
-        assertEquals(1, diags.size());
-        assertEquals("DUPLICATE_SYMBOL", diags.get(0).code());
-        assertTrue(diags.get(0).message().contains("@loop"));
-    }
+    var file = scanner.tokenize(code);
+    List<SyntaxDiagnostic> diags = validator.validate(file);
+    assertEquals(1, diags.size());
+    assertEquals("DUPLICATE_SYMBOL", diags.get(0).code());
+    assertTrue(diags.get(0).message().contains("@loop"));
+  }
 
-    @Test
-    public void testCheapLocalLabelsAllowedUnderDifferentLabels() {
-        var code = """
+  @Test
+  public void testCheapLocalLabelsAllowedUnderDifferentLabels() {
+    var code =
+        """
                 sub1:
                 @loop:
                     bra @loop
@@ -70,8 +74,8 @@ public class DuplicateSymbolValidatorTest {
                 @loop:
                     bra @loop
                 """;
-        var file = scanner.tokenize(code);
-        List<SyntaxDiagnostic> diags = validator.validate(file);
-        assertTrue(diags.isEmpty(), "Expected no duplicate diagnostics across different parent labels");
-    }
+    var file = scanner.tokenize(code);
+    List<SyntaxDiagnostic> diags = validator.validate(file);
+    assertTrue(diags.isEmpty(), "Expected no duplicate diagnostics across different parent labels");
+  }
 }

@@ -1,9 +1,9 @@
 open module dev.secondsun.retro.util {
-    requires java.logging;
-    requires java.xml;
+  requires java.logging;
+  requires java.xml;
 
-    exports dev.secondsun.retro.util;
-    exports dev.secondsun.retro.util.diagnostic;
-    exports dev.secondsun.retro.util.instruction;
-    exports dev.secondsun.retro.util.vo;
+  exports dev.secondsun.retro.util;
+  exports dev.secondsun.retro.util.diagnostic;
+  exports dev.secondsun.retro.util.instruction;
+  exports dev.secondsun.retro.util.vo;
 }

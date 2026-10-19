@@ -16,281 +16,525 @@ import java.util.*;
  */
 public class InstructionSyntaxValidator {
 
-    private static final Set<String> ZERO_ARG_INSTRUCTIONS = Set.of(
-            "nop", "stop", "cache", "cmode", "color", "div2", "fmult", "lmult", "lob", "hib", "loop", "lsr", "not",
-            "plot", "ramb", "romb", "rol", "ror", "rpix", "sbk", "sex", "swap", "alt1", "alt2", "alt3", "merge");
+  private static final Set<String> ZERO_ARG_INSTRUCTIONS =
+      Set.of(
+          "nop", "stop", "cache", "cmode", "color", "div2", "fmult", "lmult", "lob", "hib", "loop",
+          "lsr", "not", "plot", "ramb", "romb", "rol", "ror", "rpix", "sbk", "sex", "swap", "alt1",
+          "alt2", "alt3", "merge");
 
-    private static final Set<String> TWO_ARG_INSTRUCTIONS =
-            Set.of("iwt", "ibt", "move", "moves", "lm", "sm", "lms", "sms");
+  private static final Set<String> TWO_ARG_INSTRUCTIONS =
+      Set.of("iwt", "ibt", "move", "moves", "lm", "sm", "lms", "sms");
 
-    public List<SyntaxDiagnostic> validate(TokenizedFile file) {
-        if (file == null) {
-            return List.of();
-        }
+  private static class Scope {
+    final Scope parent;
+    final Set<String> registerLabels = new HashSet<>();
 
-        List<SyntaxDiagnostic> diagnostics = new ArrayList<>();
-        URI uri = file.uri();
-
-        int totalLines = file.textLines();
-        for (int lineIdx = 0; lineIdx < totalLines; lineIdx++) {
-            Tokens lineTokens = file.getLine(lineIdx);
-            if (lineTokens == null || lineTokens.tokens().isEmpty()) {
-                continue;
-            }
-
-            int lineNum = lineIdx + 1; // 1-based
-            List<Token> tokens = lineTokens.tokens();
-
-            // 1. Check for scanner lexical errors in any token
-            for (Token token : tokens) {
-                if (token.type == TokenType.TOK_ERROR) {
-                    String msg = token.message != null && !token.message.isBlank()
-                            ? token.message
-                            : "Lexical error: " + token.text();
-                    diagnostics.add(SyntaxDiagnostic.error(
-                            uri, lineNum, token.getStartIndex(), token.getEndIndex(), "LEXICAL_ERROR", msg));
-                }
-            }
-
-            // Identify leading label if present
-            int startIdx = 0;
-            if (tokens.size() > 1
-                    && (tokens.get(1).type == TokenType.TOK_COLON
-                            || tokens.get(0).text().endsWith(":"))) {
-                startIdx = (tokens.get(1).type == TokenType.TOK_COLON) ? 2 : 1;
-                if (startIdx >= tokens.size()) {
-                    continue;
-                }
-            }
-
-            Token first = tokens.get(startIdx);
-            String firstText = first.text().toLowerCase(Locale.ROOT);
-
-            // 2. High-level DSL macro validation (function, call, return, endfunction)
-            if (first.type == TokenType.TOK_FUNCTION || "function".equals(firstText)) {
-                validateFunctionDeclaration(tokens, startIdx, lineTokens.line(), uri, lineNum, diagnostics);
-                continue;
-            }
-
-            if (first.type == TokenType.TOK_CALL || "call".equals(firstText)) {
-                validateCallStatement(tokens, startIdx, uri, lineNum, diagnostics);
-                continue;
-            }
-
-            if (first.type == TokenType.TOK_RETURN || "return".equals(firstText)) {
-                validateReturnStatement(tokens, startIdx, uri, lineNum, diagnostics);
-                continue;
-            }
-
-            if (first.type == TokenType.TOK_ENDFUNCTION || "endfunction".equals(firstText)) {
-                validateEndFunctionStatement(tokens, startIdx, uri, lineNum, diagnostics);
-                continue;
-            }
-
-            // 3. SuperFX GSU Instruction arity & syntax
-            if (GSUInstruction.isInstruction(first)) {
-                validateGsuInstruction(tokens, startIdx, lineTokens, uri, lineNum, diagnostics);
-            }
-        }
-
-        return diagnostics;
+    Scope(Scope parent) {
+      this.parent = parent;
     }
 
-    private void validateGsuInstruction(
-            List<Token> tokens,
-            int startIdx,
-            Tokens lineTokens,
-            URI uri,
-            int lineNum,
-            List<SyntaxDiagnostic> diagnostics) {
+    boolean isRegisterLabel(String name) {
+      if (name == null) {
+        return false;
+      }
+      if (registerLabels.contains(name.toLowerCase(Locale.ROOT))) {
+        return true;
+      }
+      return parent != null && parent.isRegisterLabel(name);
+    }
 
-        Token opcodeToken = tokens.get(startIdx);
-        String mnemonic = opcodeToken.text().toLowerCase(Locale.ROOT);
+    void addRegisterLabel(String name) {
+      if (name != null && !name.isBlank()) {
+        registerLabels.add(name.toLowerCase(Locale.ROOT));
+      }
+    }
+  }
 
-        // Sub-tokens starting from the opcode
-        List<Token> subTokensList = tokens.subList(startIdx, tokens.size());
-        Tokens subTokens = new Tokens(lineTokens.line(), subTokensList);
+  public List<SyntaxDiagnostic> validate(TokenizedFile file) {
+    if (file == null) {
+      return List.of();
+    }
 
-        boolean anyMatches = Arrays.stream(Instructions.values())
-                .filter(i -> i.instruction.instruction.equalsIgnoreCase(mnemonic))
-                .anyMatch(i -> i.matches(subTokens));
+    List<SyntaxDiagnostic> diagnostics = new ArrayList<>();
+    URI uri = file.uri();
 
-        if (anyMatches) {
-            return;
+    int totalLines = file.textLines();
+    Scope fileScope = new Scope(null);
+    Deque<Scope> scopeStack = new ArrayDeque<>();
+    scopeStack.push(fileScope);
+    Scope[] lineScopes = new Scope[totalLines];
+
+    // Pass 1: Build lexical scopes and collect register labels
+    for (int lineIdx = 0; lineIdx < totalLines; lineIdx++) {
+      Tokens lineTokens = file.getLine(lineIdx);
+      if (lineTokens == null || lineTokens.tokens().isEmpty()) {
+        lineScopes[lineIdx] = scopeStack.peek();
+        continue;
+      }
+
+      List<Token> tokens = lineTokens.tokens();
+      int startIdx = findStartIdx(tokens);
+      if (startIdx >= tokens.size()) {
+        lineScopes[lineIdx] = scopeStack.peek();
+        continue;
+      }
+
+      Token first = tokens.get(startIdx);
+      String firstText = first.text().toLowerCase(Locale.ROOT);
+
+      // Scope openers
+      if (first.type == TokenType.TOK_FUNCTION || "function".equals(firstText)) {
+        Scope fnScope = new Scope(scopeStack.peek());
+        scopeStack.push(fnScope);
+        collectFunctionRegisterLabels(tokens, startIdx, fnScope);
+      } else if (first.type == TokenType.TOK_PROC
+          || ".proc".equals(firstText)
+          || first.type == TokenType.TOK_SCOPE
+          || ".scope".equals(firstText)) {
+        Scope blockScope = new Scope(scopeStack.peek());
+        scopeStack.push(blockScope);
+      }
+
+      // Register declarations: register var1 [= rX], var2 [= rY]
+      if (first.type == TokenType.TOK_REGISTER_KEYWORD || "register".equals(firstText)) {
+        collectRegisterKeywordLabels(tokens, startIdx, scopeStack.peek());
+      }
+
+      lineScopes[lineIdx] = scopeStack.peek();
+
+      // Scope closers
+      if (first.type == TokenType.TOK_ENDFUNCTION
+          || "endfunction".equals(firstText)
+          || first.type == TokenType.TOK_ENDPROC
+          || ".endproc".equals(firstText)
+          || first.type == TokenType.TOK_ENDSCOPE
+          || ".endscope".equals(firstText)) {
+        if (scopeStack.size() > 1) {
+          scopeStack.pop();
         }
+      }
+    }
 
-        // Operand list (excluding commas)
-        List<Token> operandTokens = new ArrayList<>();
-        for (int i = startIdx + 1; i < tokens.size(); i++) {
-            Token t = tokens.get(i);
-            if (t.type != TokenType.TOK_COMMA && !";".equals(t.text())) {
-                operandTokens.add(t);
+    // Pass 2: Tag register label tokens and validate instructions/statements
+    for (int lineIdx = 0; lineIdx < totalLines; lineIdx++) {
+      Tokens lineTokens = file.getLine(lineIdx);
+      if (lineTokens == null || lineTokens.tokens().isEmpty()) {
+        continue;
+      }
+
+      int lineNum = lineIdx + 1; // 1-based
+      List<Token> tokens = lineTokens.tokens();
+      Scope scope = lineScopes[lineIdx];
+
+      // Tag tokens in active scope matching declared register labels
+      if (scope != null) {
+        for (Token token : tokens) {
+          if (scope.isRegisterLabel(token.text())) {
+            token.addAttribute(TokenAttribute.REGISTER_LABEL);
+          }
+        }
+      }
+
+      // 1. Check for scanner lexical errors in any token
+      for (Token token : tokens) {
+        if (token.type == TokenType.TOK_ERROR) {
+          String msg =
+              token.message != null && !token.message.isBlank()
+                  ? token.message
+                  : "Lexical error: " + token.text();
+          diagnostics.add(
+              SyntaxDiagnostic.error(
+                  uri, lineNum, token.getStartIndex(), token.getEndIndex(), "LEXICAL_ERROR", msg));
+        }
+      }
+
+      // Identify leading label if present
+      int startIdx = findStartIdx(tokens);
+      if (startIdx >= tokens.size()) {
+        continue;
+      }
+
+      Token first = tokens.get(startIdx);
+      String firstText = first.text().toLowerCase(Locale.ROOT);
+
+      // 2. High-level DSL macro validation (function, call, return, endfunction, register)
+      if (first.type == TokenType.TOK_FUNCTION || "function".equals(firstText)) {
+        validateFunctionDeclaration(tokens, startIdx, lineTokens.line(), uri, lineNum, diagnostics);
+        continue;
+      }
+
+      if (first.type == TokenType.TOK_CALL || "call".equals(firstText)) {
+        validateCallStatement(tokens, startIdx, uri, lineNum, diagnostics);
+        continue;
+      }
+
+      if (first.type == TokenType.TOK_RETURN || "return".equals(firstText)) {
+        validateReturnStatement(tokens, startIdx, uri, lineNum, diagnostics);
+        continue;
+      }
+
+      if (first.type == TokenType.TOK_ENDFUNCTION || "endfunction".equals(firstText)) {
+        validateEndFunctionStatement(tokens, startIdx, uri, lineNum, diagnostics);
+        continue;
+      }
+
+      if (first.type == TokenType.TOK_REGISTER_KEYWORD || "register".equals(firstText)) {
+        validateRegisterDeclaration(tokens, startIdx, uri, lineNum, diagnostics);
+        continue;
+      }
+
+      // 3. SuperFX GSU Instruction arity & syntax
+      if (GSUInstruction.isInstruction(first)) {
+        validateGsuInstruction(tokens, startIdx, lineTokens, uri, lineNum, diagnostics);
+      }
+    }
+
+    return diagnostics;
+  }
+
+  private int findStartIdx(List<Token> tokens) {
+    if (tokens.size() > 1
+        && (tokens.get(1).type == TokenType.TOK_COLON || tokens.get(0).text().endsWith(":"))) {
+      return (tokens.get(1).type == TokenType.TOK_COLON) ? 2 : 1;
+    }
+    return 0;
+  }
+
+  private void collectFunctionRegisterLabels(List<Token> tokens, int startIdx, Scope fnScope) {
+    List<Token> fnTokens = tokens.subList(startIdx, tokens.size());
+    var decl = FunctionSyntaxHelper.parseFunction(fnTokens);
+    for (Token param : decl.parameters()) {
+      if (!param.text().matches("^[rR]\\d+$")) {
+        fnScope.addRegisterLabel(param.text());
+        param.addAttribute(TokenAttribute.REGISTER_LABEL);
+      }
+    }
+    if (decl.returnVariable().isPresent()) {
+      Token ret = decl.returnVariable().get();
+      if (!ret.text().matches("^[rR]\\d+$")) {
+        fnScope.addRegisterLabel(ret.text());
+        ret.addAttribute(TokenAttribute.REGISTER_LABEL);
+      }
+    }
+  }
+
+  private void collectRegisterKeywordLabels(List<Token> tokens, int startIdx, Scope currentScope) {
+    int i = startIdx + 1;
+    while (i < tokens.size()) {
+      Token t = tokens.get(i);
+      if (t.type == TokenType.TOK_IDENT || t.type == TokenType.TOK_LOCAL_IDENT) {
+        currentScope.addRegisterLabel(t.text());
+        t.addAttribute(TokenAttribute.REGISTER_LABEL);
+        i++;
+        if (i < tokens.size()) {
+          Token next = tokens.get(i);
+          if (next.type == TokenType.TOK_EQ
+              || next.type == TokenType.TOK_ASSIGN
+              || "=".equals(next.text())) {
+            i++;
+            while (i < tokens.size() && tokens.get(i).type != TokenType.TOK_COMMA) {
+              i++;
             }
+          }
         }
+      } else {
+        i++;
+      }
+    }
+  }
 
-        if (ZERO_ARG_INSTRUCTIONS.contains(mnemonic)) {
-            if (!operandTokens.isEmpty()) {
-                Token extra = operandTokens.get(0);
-                diagnostics.add(SyntaxDiagnostic.error(
+  private void validateRegisterDeclaration(
+      List<Token> tokens, int startIdx, URI uri, int lineNum, List<SyntaxDiagnostic> diagnostics) {
+    if (startIdx + 1 >= tokens.size()) {
+      Token kw = tokens.get(startIdx);
+      diagnostics.add(
+          SyntaxDiagnostic.error(
+              uri,
+              lineNum,
+              kw.getStartIndex(),
+              kw.getEndIndex(),
+              "REGISTER_DECLARATION_ERROR",
+              "Missing variable name after 'register'"));
+      return;
+    }
+
+    int i = startIdx + 1;
+    boolean expectIdent = true;
+    while (i < tokens.size()) {
+      Token t = tokens.get(i);
+      if (expectIdent) {
+        if (t.type == TokenType.TOK_IDENT || t.type == TokenType.TOK_LOCAL_IDENT) {
+          expectIdent = false;
+          i++;
+          if (i < tokens.size()) {
+            Token next = tokens.get(i);
+            if (next.type == TokenType.TOK_EQ
+                || next.type == TokenType.TOK_ASSIGN
+                || "=".equals(next.text())) {
+              i++; // Skip '='
+              if (i >= tokens.size() || tokens.get(i).type == TokenType.TOK_COMMA) {
+                diagnostics.add(
+                    SyntaxDiagnostic.error(
                         uri,
                         lineNum,
-                        extra.getStartIndex(),
-                        tokens.get(tokens.size() - 1).getEndIndex(),
-                        "EXTRA_OPERAND",
-                        String.format(
-                                "Instruction '%s' takes no operands (found %d)",
-                                opcodeToken.text(), operandTokens.size())));
-            }
-            return;
-        }
-
-        if (TWO_ARG_INSTRUCTIONS.contains(mnemonic)) {
-            // Count logical arguments separated by commas
-            int commaCount = 0;
-            for (int i = startIdx + 1; i < tokens.size(); i++) {
-                if (tokens.get(i).type == TokenType.TOK_COMMA) {
-                    commaCount++;
+                        next.getStartIndex(),
+                        next.getEndIndex(),
+                        "REGISTER_DECLARATION_ERROR",
+                        "Missing register or value after '='"));
+              } else {
+                while (i < tokens.size() && tokens.get(i).type != TokenType.TOK_COMMA) {
+                  i++;
                 }
+              }
             }
-
-            if (operandTokens.isEmpty()) {
-                diagnostics.add(SyntaxDiagnostic.error(
-                        uri,
-                        lineNum,
-                        opcodeToken.getStartIndex(),
-                        opcodeToken.getEndIndex(),
-                        "MISSING_OPERAND",
-                        String.format(
-                                "Instruction '%s' requires 2 operands (e.g. register, value/address), found none",
-                                opcodeToken.text())));
-            } else if (commaCount == 0 && operandTokens.size() < 2) {
-                Token last = operandTokens.get(operandTokens.size() - 1);
-                diagnostics.add(SyntaxDiagnostic.error(
-                        uri,
-                        lineNum,
-                        last.getStartIndex(),
-                        last.getEndIndex(),
-                        "MISSING_OPERAND",
-                        String.format(
-                                "Instruction '%s' requires 2 operands separated by comma, found 1",
-                                opcodeToken.text())));
-            } else {
-                diagnostics.add(SyntaxDiagnostic.error(
-                        uri,
-                        lineNum,
-                        tokens.get(startIdx + 1).getStartIndex(),
-                        tokens.get(tokens.size() - 1).getEndIndex(),
-                        "INVALID_OPERAND",
-                        String.format("Invalid operands for instruction '%s'", opcodeToken.text())));
-            }
-            return;
-        }
-
-        // Single operand instructions (branches, jumps, arithmetic with register/immediate, to/from/with)
-        if (operandTokens.isEmpty()) {
-            diagnostics.add(SyntaxDiagnostic.error(
-                    uri,
-                    lineNum,
-                    opcodeToken.getStartIndex(),
-                    opcodeToken.getEndIndex(),
-                    "MISSING_OPERAND",
-                    String.format(
-                            "Instruction '%s' requires an operand (register, immediate, or label)",
-                            opcodeToken.text())));
+          }
         } else {
-            diagnostics.add(SyntaxDiagnostic.error(
+          diagnostics.add(
+              SyntaxDiagnostic.error(
+                  uri,
+                  lineNum,
+                  t.getStartIndex(),
+                  t.getEndIndex(),
+                  "REGISTER_DECLARATION_ERROR",
+                  "Expected variable identifier, found: " + t.text()));
+          i++;
+        }
+      } else {
+        if (t.type == TokenType.TOK_COMMA) {
+          expectIdent = true;
+          i++;
+          if (i >= tokens.size()) {
+            diagnostics.add(
+                SyntaxDiagnostic.error(
                     uri,
                     lineNum,
-                    tokens.get(startIdx + 1).getStartIndex(),
-                    tokens.get(tokens.size() - 1).getEndIndex(),
-                    "INVALID_OPERAND",
-                    String.format("Invalid operand format for instruction '%s'", opcodeToken.text())));
+                    t.getStartIndex(),
+                    t.getEndIndex(),
+                    "REGISTER_DECLARATION_ERROR",
+                    "Dangling comma in register declaration"));
+          }
+        } else {
+          diagnostics.add(
+              SyntaxDiagnostic.error(
+                  uri,
+                  lineNum,
+                  t.getStartIndex(),
+                  t.getEndIndex(),
+                  "REGISTER_DECLARATION_ERROR",
+                  "Unexpected token in register declaration: " + t.text()));
+          i++;
         }
+      }
+    }
+  }
+
+  private void validateGsuInstruction(
+      List<Token> tokens,
+      int startIdx,
+      Tokens lineTokens,
+      URI uri,
+      int lineNum,
+      List<SyntaxDiagnostic> diagnostics) {
+
+    Token opcodeToken = tokens.get(startIdx);
+    String mnemonic = opcodeToken.text().toLowerCase(Locale.ROOT);
+
+    // Sub-tokens starting from the opcode
+    List<Token> subTokensList = tokens.subList(startIdx, tokens.size());
+    Tokens subTokens = new Tokens(lineTokens.line(), subTokensList);
+
+    boolean anyMatches =
+        Arrays.stream(Instructions.values())
+            .filter(i -> i.instruction.instruction.equalsIgnoreCase(mnemonic))
+            .anyMatch(i -> i.matches(subTokens));
+
+    if (anyMatches) {
+      return;
     }
 
-    private void validateFunctionDeclaration(
-            List<Token> tokens,
-            int startIdx,
-            String rawLine,
-            URI uri,
-            int lineNum,
-            List<SyntaxDiagnostic> diagnostics) {
-
-        List<Token> fnTokens = tokens.subList(startIdx, tokens.size());
-        var decl = FunctionSyntaxHelper.parseFunction(fnTokens);
-
-        if (decl.hasErrors()) {
-            for (Token t : fnTokens) {
-                if (t.hasAttribute(TokenAttribute.ERROR)) {
-                    diagnostics.add(SyntaxDiagnostic.error(
-                            uri,
-                            lineNum,
-                            t.getStartIndex(),
-                            t.getEndIndex(),
-                            "FUNCTION_DECLARATION_ERROR",
-                            t.message != null ? t.message : "Invalid function declaration syntax"));
-                }
-            }
-        }
+    // Operand list (excluding commas)
+    List<Token> operandTokens = new ArrayList<>();
+    for (int i = startIdx + 1; i < tokens.size(); i++) {
+      Token t = tokens.get(i);
+      if (t.type != TokenType.TOK_COMMA && !";".equals(t.text())) {
+        operandTokens.add(t);
+      }
     }
 
-    private void validateCallStatement(
-            List<Token> tokens, int startIdx, URI uri, int lineNum, List<SyntaxDiagnostic> diagnostics) {
-
-        List<Token> callTokens = tokens.subList(startIdx, tokens.size());
-        var call = FunctionSyntaxHelper.parseCall(callTokens);
-
-        if (call.hasErrors()) {
-            for (Token t : callTokens) {
-                if (t.hasAttribute(TokenAttribute.ERROR)) {
-                    diagnostics.add(SyntaxDiagnostic.error(
-                            uri,
-                            lineNum,
-                            t.getStartIndex(),
-                            t.getEndIndex(),
-                            "CALL_STATEMENT_ERROR",
-                            t.message != null ? t.message : "Invalid call statement syntax"));
-                }
-            }
-        }
+    if (ZERO_ARG_INSTRUCTIONS.contains(mnemonic)) {
+      if (!operandTokens.isEmpty()) {
+        Token extra = operandTokens.get(0);
+        diagnostics.add(
+            SyntaxDiagnostic.error(
+                uri,
+                lineNum,
+                extra.getStartIndex(),
+                tokens.get(tokens.size() - 1).getEndIndex(),
+                "EXTRA_OPERAND",
+                String.format(
+                    "Instruction '%s' takes no operands (found %d)",
+                    opcodeToken.text(), operandTokens.size())));
+      }
+      return;
     }
 
-    private void validateReturnStatement(
-            List<Token> tokens, int startIdx, URI uri, int lineNum, List<SyntaxDiagnostic> diagnostics) {
-
-        List<Token> returnTokens = tokens.subList(startIdx, tokens.size());
-        var ret = FunctionSyntaxHelper.parseReturn(returnTokens);
-
-        if (ret.hasErrors()) {
-            for (Token t : returnTokens) {
-                if (t.hasAttribute(TokenAttribute.ERROR)) {
-                    diagnostics.add(SyntaxDiagnostic.error(
-                            uri,
-                            lineNum,
-                            t.getStartIndex(),
-                            t.getEndIndex(),
-                            "RETURN_STATEMENT_ERROR",
-                            t.message != null ? t.message : "Invalid return statement syntax"));
-                }
-            }
+    if (TWO_ARG_INSTRUCTIONS.contains(mnemonic)) {
+      // Count logical arguments separated by commas
+      int commaCount = 0;
+      for (int i = startIdx + 1; i < tokens.size(); i++) {
+        if (tokens.get(i).type == TokenType.TOK_COMMA) {
+          commaCount++;
         }
+      }
+
+      if (operandTokens.isEmpty()) {
+        diagnostics.add(
+            SyntaxDiagnostic.error(
+                uri,
+                lineNum,
+                opcodeToken.getStartIndex(),
+                opcodeToken.getEndIndex(),
+                "MISSING_OPERAND",
+                String.format(
+                    "Instruction '%s' requires 2 operands (e.g. register, value/address), found none",
+                    opcodeToken.text())));
+      } else if (commaCount == 0 && operandTokens.size() < 2) {
+        Token last = operandTokens.get(operandTokens.size() - 1);
+        diagnostics.add(
+            SyntaxDiagnostic.error(
+                uri,
+                lineNum,
+                last.getStartIndex(),
+                last.getEndIndex(),
+                "MISSING_OPERAND",
+                String.format(
+                    "Instruction '%s' requires 2 operands separated by comma, found 1",
+                    opcodeToken.text())));
+      } else {
+        diagnostics.add(
+            SyntaxDiagnostic.error(
+                uri,
+                lineNum,
+                tokens.get(startIdx + 1).getStartIndex(),
+                tokens.get(tokens.size() - 1).getEndIndex(),
+                "INVALID_OPERAND",
+                String.format("Invalid operands for instruction '%s'", opcodeToken.text())));
+      }
+      return;
     }
 
-    private void validateEndFunctionStatement(
-            List<Token> tokens, int startIdx, URI uri, int lineNum, List<SyntaxDiagnostic> diagnostics) {
-
-        List<Token> endTokens = tokens.subList(startIdx, tokens.size());
-        if (!FunctionSyntaxHelper.validateEndFunction(endTokens)) {
-            for (int i = 1; i < endTokens.size(); i++) {
-                Token t = endTokens.get(i);
-                diagnostics.add(SyntaxDiagnostic.error(
-                        uri,
-                        lineNum,
-                        t.getStartIndex(),
-                        t.getEndIndex(),
-                        "EXTRA_TOKENS",
-                        "Unexpected token after endfunction: " + t.text()));
-            }
-        }
+    // Single operand instructions (branches, jumps, arithmetic with register/immediate,
+    // to/from/with)
+    if (operandTokens.isEmpty()) {
+      diagnostics.add(
+          SyntaxDiagnostic.error(
+              uri,
+              lineNum,
+              opcodeToken.getStartIndex(),
+              opcodeToken.getEndIndex(),
+              "MISSING_OPERAND",
+              String.format(
+                  "Instruction '%s' requires an operand (register, immediate, or label)",
+                  opcodeToken.text())));
+    } else {
+      diagnostics.add(
+          SyntaxDiagnostic.error(
+              uri,
+              lineNum,
+              tokens.get(startIdx + 1).getStartIndex(),
+              tokens.get(tokens.size() - 1).getEndIndex(),
+              "INVALID_OPERAND",
+              String.format("Invalid operand format for instruction '%s'", opcodeToken.text())));
     }
+  }
+
+  private void validateFunctionDeclaration(
+      List<Token> tokens,
+      int startIdx,
+      String rawLine,
+      URI uri,
+      int lineNum,
+      List<SyntaxDiagnostic> diagnostics) {
+
+    List<Token> fnTokens = tokens.subList(startIdx, tokens.size());
+    var decl = FunctionSyntaxHelper.parseFunction(fnTokens);
+
+    if (decl.hasErrors()) {
+      for (Token t : fnTokens) {
+        if (t.hasAttribute(TokenAttribute.ERROR)) {
+          diagnostics.add(
+              SyntaxDiagnostic.error(
+                  uri,
+                  lineNum,
+                  t.getStartIndex(),
+                  t.getEndIndex(),
+                  "FUNCTION_DECLARATION_ERROR",
+                  t.message != null ? t.message : "Invalid function declaration syntax"));
+        }
+      }
+    }
+  }
+
+  private void validateCallStatement(
+      List<Token> tokens, int startIdx, URI uri, int lineNum, List<SyntaxDiagnostic> diagnostics) {
+
+    List<Token> callTokens = tokens.subList(startIdx, tokens.size());
+    var call = FunctionSyntaxHelper.parseCall(callTokens);
+
+    if (call.hasErrors()) {
+      for (Token t : callTokens) {
+        if (t.hasAttribute(TokenAttribute.ERROR)) {
+          diagnostics.add(
+              SyntaxDiagnostic.error(
+                  uri,
+                  lineNum,
+                  t.getStartIndex(),
+                  t.getEndIndex(),
+                  "CALL_STATEMENT_ERROR",
+                  t.message != null ? t.message : "Invalid call statement syntax"));
+        }
+      }
+    }
+  }
+
+  private void validateReturnStatement(
+      List<Token> tokens, int startIdx, URI uri, int lineNum, List<SyntaxDiagnostic> diagnostics) {
+
+    List<Token> returnTokens = tokens.subList(startIdx, tokens.size());
+    var ret = FunctionSyntaxHelper.parseReturn(returnTokens);
+
+    if (ret.hasErrors()) {
+      for (Token t : returnTokens) {
+        if (t.hasAttribute(TokenAttribute.ERROR)) {
+          diagnostics.add(
+              SyntaxDiagnostic.error(
+                  uri,
+                  lineNum,
+                  t.getStartIndex(),
+                  t.getEndIndex(),
+                  "RETURN_STATEMENT_ERROR",
+                  t.message != null ? t.message : "Invalid return statement syntax"));
+        }
+      }
+    }
+  }
+
+  private void validateEndFunctionStatement(
+      List<Token> tokens, int startIdx, URI uri, int lineNum, List<SyntaxDiagnostic> diagnostics) {
+
+    List<Token> endTokens = tokens.subList(startIdx, tokens.size());
+    if (!FunctionSyntaxHelper.validateEndFunction(endTokens)) {
+      for (int i = 1; i < endTokens.size(); i++) {
+        Token t = endTokens.get(i);
+        diagnostics.add(
+            SyntaxDiagnostic.error(
+                uri,
+                lineNum,
+                t.getStartIndex(),
+                t.getEndIndex(),
+                "EXTRA_TOKENS",
+                "Unexpected token after endfunction: " + t.text()));
+      }
+    }
+  }
 }

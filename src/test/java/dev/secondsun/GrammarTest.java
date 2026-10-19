@@ -8,9 +8,10 @@ import org.junit.jupiter.api.Test;
 
 public class GrammarTest {
 
-    @Test
-    public void testGeneralTokenization() {
-        var program = """
+  @Test
+  public void testGeneralTokenization() {
+    var program =
+        """
             iwt r1 , #5
             stw ( r1 )
             bra next
@@ -24,14 +25,15 @@ public class GrammarTest {
             stw ( r3 )
         """;
 
-        var file = new CA65Scanner().tokenize(program);
-        assertEquals(TokenType.TOK_REGISTER, file.getLineTokens(0).get(1).type);
-        assertEquals(TokenType.TOK_IDENT, file.getLineTokens(2).get(1).type);
-    }
+    var file = new CA65Scanner().tokenize(program);
+    assertEquals(TokenType.TOK_REGISTER, file.getLineTokens(0).get(1).type);
+    assertEquals(TokenType.TOK_IDENT, file.getLineTokens(2).get(1).type);
+  }
 
-    @Test
-    public void testUserVectorFileParsesWithoutErrors() {
-        var program = """
+  @Test
+  public void testUserVectorFileParsesWithoutErrors() {
+    var program =
+"""
 ; SuperFX
 ; Summers Pittman <secondsun@gmail.com>
 ; Vector utility functions
@@ -500,7 +502,7 @@ function vector3_length
 
 	with r1
 	add #2 ;r1 = vec.y
-	
+
 	;r0 = (vec.y)
 	ldw (r1)
 	;square vec.y/r0
@@ -511,7 +513,7 @@ function vector3_length
 
 	with r1
 	add #2 ;r1 = vec.z
-	
+
 	;r0 = (vec.z)
 	ldw (r1)
 	;square vec.z/r0
@@ -614,59 +616,67 @@ endfunction
 .endif
         """;
 
-        var scanner = new CA65Scanner();
-        var file = scanner.tokenize(program);
-        file.uri = java.net.URI.create("file:///test/gsu_vector.i");
+    var scanner = new CA65Scanner();
+    var file = scanner.tokenize(program);
+    file.uri = java.net.URI.create("file:///test/gsu_vector.i");
 
-        // Verify no token-level errors from scanner
-        for (int i = 0; i < file.textLines(); i++) {
-            var tokens = file.getLineTokens(i);
-            for (var tok : tokens) {
-                org.junit.jupiter.api.Assertions.assertNotEquals(
-                        TokenType.TOK_ERROR,
-                        tok.type,
-                        "Token error on line " + i + ": " + tok.message + " ('" + tok.text() + "')");
-                org.junit.jupiter.api.Assertions.assertFalse(
-                        tok.hasAttribute(dev.secondsun.retro.util.TokenAttribute.ERROR),
-                        "Token has error attribute on line " + i + ": " + tok.message + " ('" + tok.text() + "')");
-            }
-        }
-
-        // Verify pseudo-macro function syntax validation
-        for (int i = 0; i < file.textLines(); i++) {
-            var tokens = file.getLineTokens(i);
-            if (dev.secondsun.retro.util.FunctionSyntaxHelper.isFunction(tokens)) {
-                var func = dev.secondsun.retro.util.FunctionSyntaxHelper.parseFunction(tokens);
-                org.junit.jupiter.api.Assertions.assertFalse(
-                        func.hasErrors(), "Function declaration error on line " + i + ": " + func.name());
-            } else if (dev.secondsun.retro.util.FunctionSyntaxHelper.isCall(tokens)) {
-                var call = dev.secondsun.retro.util.FunctionSyntaxHelper.parseCall(tokens);
-                org.junit.jupiter.api.Assertions.assertFalse(
-                        call.hasErrors(), "Call statement error on line " + i + ": " + call.targetName());
-            } else if (dev.secondsun.retro.util.FunctionSyntaxHelper.isReturn(tokens)) {
-                var ret = dev.secondsun.retro.util.FunctionSyntaxHelper.parseReturn(tokens);
-                org.junit.jupiter.api.Assertions.assertFalse(ret.hasErrors(), "Return statement error on line " + i);
-            } else if (dev.secondsun.retro.util.FunctionSyntaxHelper.isEndFunction(tokens)) {
-                boolean validEnd = dev.secondsun.retro.util.FunctionSyntaxHelper.validateEndFunction(tokens);
-                org.junit.jupiter.api.Assertions.assertTrue(validEnd, "Endfunction error on line " + i);
-            }
-        }
-
-        // Verify symbol extraction passes
-        var symbolService = new dev.secondsun.retro.util.SymbolService();
-        symbolService.extractDefinitions(file);
-
-        org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("condensed_lmult"));
-        org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_copy"));
-        org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_cross"));
-        org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_dot"));
-        org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_add"));
-        org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_negate"));
-        org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_subtract"));
-        org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_normalize"));
-        org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("_normalize_big"));
-        org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("_normalize_small"));
-        org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_length"));
-        org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_transform"));
+    // Verify no token-level errors from scanner
+    for (int i = 0; i < file.textLines(); i++) {
+      var tokens = file.getLineTokens(i);
+      for (var tok : tokens) {
+        org.junit.jupiter.api.Assertions.assertNotEquals(
+            TokenType.TOK_ERROR,
+            tok.type,
+            "Token error on line " + i + ": " + tok.message + " ('" + tok.text() + "')");
+        org.junit.jupiter.api.Assertions.assertFalse(
+            tok.hasAttribute(dev.secondsun.retro.util.TokenAttribute.ERROR),
+            "Token has error attribute on line "
+                + i
+                + ": "
+                + tok.message
+                + " ('"
+                + tok.text()
+                + "')");
+      }
     }
+
+    // Verify pseudo-macro function syntax validation
+    for (int i = 0; i < file.textLines(); i++) {
+      var tokens = file.getLineTokens(i);
+      if (dev.secondsun.retro.util.FunctionSyntaxHelper.isFunction(tokens)) {
+        var func = dev.secondsun.retro.util.FunctionSyntaxHelper.parseFunction(tokens);
+        org.junit.jupiter.api.Assertions.assertFalse(
+            func.hasErrors(), "Function declaration error on line " + i + ": " + func.name());
+      } else if (dev.secondsun.retro.util.FunctionSyntaxHelper.isCall(tokens)) {
+        var call = dev.secondsun.retro.util.FunctionSyntaxHelper.parseCall(tokens);
+        org.junit.jupiter.api.Assertions.assertFalse(
+            call.hasErrors(), "Call statement error on line " + i + ": " + call.targetName());
+      } else if (dev.secondsun.retro.util.FunctionSyntaxHelper.isReturn(tokens)) {
+        var ret = dev.secondsun.retro.util.FunctionSyntaxHelper.parseReturn(tokens);
+        org.junit.jupiter.api.Assertions.assertFalse(
+            ret.hasErrors(), "Return statement error on line " + i);
+      } else if (dev.secondsun.retro.util.FunctionSyntaxHelper.isEndFunction(tokens)) {
+        boolean validEnd =
+            dev.secondsun.retro.util.FunctionSyntaxHelper.validateEndFunction(tokens);
+        org.junit.jupiter.api.Assertions.assertTrue(validEnd, "Endfunction error on line " + i);
+      }
+    }
+
+    // Verify symbol extraction passes
+    var symbolService = new dev.secondsun.retro.util.SymbolService();
+    symbolService.extractDefinitions(file);
+
+    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("condensed_lmult"));
+    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_copy"));
+    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_cross"));
+    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_dot"));
+    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_add"));
+    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_negate"));
+    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_subtract"));
+    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_normalize"));
+    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("_normalize_big"));
+    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("_normalize_small"));
+    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_length"));
+    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_transform"));
+  }
 }
