@@ -88,6 +88,12 @@ public class TokenizedFileTest {
     // jsr: 0..3, mySymbol: 4..12
     assertEquals("mySymbol", file.getQualifiedSymbolAt(3, 8).orElse(null));
 
+    // Multi-segment namespace: "jsr Engine::Math::Vector3"
+    var multiFile = scanner.tokenize("jsr Engine::Math::Vector3\n");
+    assertEquals("Engine::Math::Vector3", multiFile.getQualifiedSymbolAt(0, 4).orElse(null));
+    assertEquals("Engine::Math::Vector3", multiFile.getQualifiedSymbolAt(0, 12).orElse(null));
+    assertEquals("Engine::Math::Vector3", multiFile.getQualifiedSymbolAt(0, 18).orElse(null));
+
     // Invalid / out-of-bounds positions
     assertTrue(file.getQualifiedSymbolAt(-1, 0).isEmpty());
     assertTrue(file.getQualifiedSymbolAt(99, 0).isEmpty());

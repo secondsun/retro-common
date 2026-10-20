@@ -131,4 +131,33 @@ public class WorkspaceIndexTest {
     List<Location> locs = workspaceIndex.resolveLocations("my_func", uri, 1);
     assertEquals(1, locs.size());
   }
+
+  @Test
+  public void testConcurrentBufferResolution() throws Exception {
+    int threadCount = 8;
+    int iterations = 20;
+    var executor = java.util.concurrent.Executors.newFixedThreadPool(threadCount);
+    var futures = new ArrayList<java.util.concurrent.Future<?>>();
+
+    for (int t = 0; t < threadCount; t++) {
+      final int threadId = t;
+      futures.add(
+          executor.submit(
+              () -> {
+                for (int i = 0; i < iterations; i++) {
+                  URI fileUri = tempDir.resolve("thread_" + threadId + "_file_" + i + ".s").toUri();
+                  String code = "label_" + threadId + "_" + i + ":\n  nop\n";
+                  TokenizedFile tf = workspaceIndex.resolveFile(fileUri, code);
+                  assertNotNull(tf);
+                  assertFalse(tf.isEmpty());
+                  assertEquals(tf, workspaceIndex.getFileContents(fileUri));
+                }
+              }));
+    }
+
+    for (var future : futures) {
+      future.get(10, java.util.concurrent.TimeUnit.SECONDS);
+    }
+    executor.shutdown();
+  }
 }
