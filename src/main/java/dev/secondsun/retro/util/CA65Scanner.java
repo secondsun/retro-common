@@ -707,8 +707,11 @@ public class CA65Scanner {
       c = nextChar();
     }
 
-    /* Skip the trailing terminator */
-    c = nextChar();
+    /* Skip the trailing terminator (only if the string was actually terminated;
+     * after a newline/EOF the column is stale and reading again would overrun the new line) */
+    if (c == stringTerm) {
+      c = nextChar();
+    }
   }
 
   private boolean isControl(char c2) {
