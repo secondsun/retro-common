@@ -119,7 +119,9 @@ public sealed interface ArgumentMatcher {
         return false;
       }
       var token = in.remove(0);
-      return token.type == TokenType.TOK_IDENT || token.type == TokenType.TOK_LOCAL_IDENT;
+      return token.type == TokenType.TOK_IDENT
+          || token.type == TokenType.TOK_LOCAL_IDENT
+          || token.type == TokenType.TOK_ULABEL;
     }
   }
 

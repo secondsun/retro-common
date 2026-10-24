@@ -198,4 +198,20 @@ public class InstructionSyntaxValidatorTest {
     assertEquals(3, diags.size(), "Expected 3 register declaration errors, found: " + diags);
     assertTrue(diags.stream().allMatch(d -> "REGISTER_DECLARATION_ERROR".equals(d.code())));
   }
+
+  @Test
+  public void testAnonymousLabelBranchOperands() {
+    var code =
+        """
+                :       wai
+                        bra :-
+                        beq :--
+                        bne :+
+                        bra :++
+                :       nop
+                """;
+    var file = new CA65Scanner().tokenize(code);
+    List<SyntaxDiagnostic> diags = validator.validate(file);
+    assertTrue(diags.isEmpty(), "Anonymous label branch targets are valid ca65, found: " + diags);
+  }
 }
