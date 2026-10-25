@@ -214,4 +214,48 @@ public class InstructionSyntaxValidatorTest {
     List<SyntaxDiagnostic> diags = validator.validate(file);
     assertTrue(diags.isEmpty(), "Anonymous label branch targets are valid ca65, found: " + diags);
   }
+
+  @Test
+  public void testScopedLabelBranchOperands() {
+    var code =
+        """
+                bne foo::bar
+                bra ::top
+                beq outer::inner::target
+                """;
+    var diags = validator.validate(new CA65Scanner().tokenize(code));
+    assertTrue(diags.isEmpty(), "Scoped label branch targets are valid ca65, found: " + diags);
+  }
+
+  @Test
+  public void testErrorDirectiveIsNotLexicalError() {
+    var diags = validator.validate(new CA65Scanner().tokenize(".error \"boom\"\n"));
+    assertTrue(diags.isEmpty(), "found: " + diags);
+  }
+
+  @Test
+  public void testMacroBodyOperandsAreNotValidated() {
+    var code =
+        """
+                .macro gsu_pop R
+                    add R
+                    inc stackPointer
+                    iwt R, #.sizeof(x)
+                .endmacro
+                """;
+    var diags = validator.validate(new CA65Scanner().tokenize(code));
+    assertTrue(diags.isEmpty(), "Macro bodies should not be operand-validated, found: " + diags);
+  }
+
+  @Test
+  public void testInvalidOperandStillReportedOutsideMacro() {
+    var code =
+        """
+                .macro m
+                .endmacro
+                add notAReg ,, 1
+                """;
+    var diags = validator.validate(new CA65Scanner().tokenize(code));
+    assertFalse(diags.isEmpty());
+  }
 }

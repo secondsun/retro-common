@@ -116,6 +116,7 @@ public class InstructionSyntaxValidator {
     }
 
     // Pass 2: Tag register label tokens and validate instructions/statements
+    boolean inMacro = false;
     for (int lineIdx = 0; lineIdx < totalLines; lineIdx++) {
       Tokens lineTokens = file.getLine(lineIdx);
       if (lineTokens == null || lineTokens.tokens().isEmpty()) {
@@ -137,7 +138,8 @@ public class InstructionSyntaxValidator {
 
       // 1. Check for scanner lexical errors in any token
       for (Token token : tokens) {
-        if (token.type == TokenType.TOK_ERROR) {
+        // The .error directive is scanned as TOK_ERROR but is not a lexical error.
+        if (token.type == TokenType.TOK_ERROR && !".error".equalsIgnoreCase(token.text())) {
           String msg =
               token.message != null && !token.message.isBlank()
                   ? token.message
@@ -156,6 +158,24 @@ public class InstructionSyntaxValidator {
 
       Token first = tokens.get(startIdx);
       String firstText = first.text().toLowerCase(Locale.ROOT);
+
+      // Macro bodies contain parameters and .define names as operands, which are only
+      // meaningful after expansion, so skip operand/instruction validation inside them.
+      if (first.type == TokenType.TOK_MACRO
+          || ".macro".equals(firstText)
+          || ".mac".equals(firstText)) {
+        inMacro = true;
+        continue;
+      }
+      if (first.type == TokenType.TOK_ENDMACRO
+          || ".endmacro".equals(firstText)
+          || ".endmac".equals(firstText)) {
+        inMacro = false;
+        continue;
+      }
+      if (inMacro) {
+        continue;
+      }
 
       // 2. High-level DSL macro validation (function, call, return, endfunction, register)
       if (first.type == TokenType.TOK_FUNCTION || "function".equals(firstText)) {

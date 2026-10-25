@@ -119,9 +119,28 @@ public sealed interface ArgumentMatcher {
         return false;
       }
       var token = in.remove(0);
-      return token.type == TokenType.TOK_IDENT
-          || token.type == TokenType.TOK_LOCAL_IDENT
-          || token.type == TokenType.TOK_ULABEL;
+      if (token.type == TokenType.TOK_ULABEL) {
+        return true;
+      }
+      // Optional leading '::' (global scope), e.g. ::label
+      if (token.type == TokenType.TOK_NAMESPACE) {
+        if (in.isEmpty()) {
+          return false;
+        }
+        token = in.remove(0);
+      }
+      if (token.type != TokenType.TOK_IDENT && token.type != TokenType.TOK_LOCAL_IDENT) {
+        return false;
+      }
+      // Scoped names: scope::label::label
+      while (in.size() >= 2
+          && in.get(0).type == TokenType.TOK_NAMESPACE
+          && (in.get(1).type == TokenType.TOK_IDENT
+              || in.get(1).type == TokenType.TOK_LOCAL_IDENT)) {
+        in.remove(0);
+        in.remove(0);
+      }
+      return true;
     }
   }
 
