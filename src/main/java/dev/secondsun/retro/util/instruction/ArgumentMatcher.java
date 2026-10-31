@@ -18,19 +18,32 @@ public sealed interface ArgumentMatcher {
 
   final class RegisterMatcher implements ArgumentMatcher {
     final int specificRegister;
+    final int minRegister;
+    final int maxRegister;
 
     public RegisterMatcher(String registerPattern) {
+      if ("R1-R15".equalsIgnoreCase(registerPattern)) {
+        specificRegister = -1;
+        minRegister = 1;
+        maxRegister = 15;
+        return;
+      }
       if (registerPattern.length() == 2 || registerPattern.length() == 3) {
         char secondChar = Character.toLowerCase(registerPattern.charAt(1));
         if (secondChar == 'n' || secondChar == 'm') {
           specificRegister = -1;
+          minRegister = 0;
+          maxRegister = 15;
         } else {
           specificRegister = Integer.parseInt(registerPattern.substring(1));
+          minRegister = specificRegister;
+          maxRegister = specificRegister;
         }
         return;
       }
       throw new IllegalArgumentException(
-          registerPattern + " is not a valid register pattern. Valid patterns are [rR][n\\d{1,2}]");
+          registerPattern
+              + " is not a valid register pattern. Valid patterns are [rR][n\\d{1,2}] or R1-R15");
     }
 
     @Override
@@ -46,7 +59,7 @@ public sealed interface ArgumentMatcher {
           if (specificRegister > -1) {
             return specificRegister == actualRegister;
           } else {
-            return actualRegister > -1 && actualRegister < 16;
+            return actualRegister >= minRegister && actualRegister <= maxRegister;
           }
         }
         return (specificRegister == -1) && token.hasAttribute(TokenAttribute.REGISTER_LABEL);
@@ -96,17 +109,29 @@ public sealed interface ArgumentMatcher {
       if (in.remove(0).type != TokenType.TOK_LPAREN) {
         return false;
       }
-      Token inner = in.remove(0);
-      boolean validInner =
-          inner.type == TokenType.TOK_INTCON
-              || inner.type == TokenType.TOK_IDENT
-              || inner.type == TokenType.TOK_LOCAL_IDENT
-              || inner.type == TokenType.TOK_REGISTER
-              || inner.hasAttribute(TokenAttribute.REGISTER_LABEL);
-      if (!validInner) {
-        return false;
+      int parenDepth = 1;
+      boolean hasValidInner = false;
+      while (!in.isEmpty() && parenDepth > 0) {
+        Token t = in.remove(0);
+        if (t.type == TokenType.TOK_LPAREN) {
+          parenDepth++;
+        } else if (t.type == TokenType.TOK_RPAREN) {
+          parenDepth--;
+        } else if (t.type == TokenType.TOK_COMMA && parenDepth == 1) {
+          return false;
+        } else if (t.type == TokenType.TOK_INTCON
+            || t.type == TokenType.TOK_IDENT
+            || t.type == TokenType.TOK_LOCAL_IDENT
+            || t.type == TokenType.TOK_REGISTER
+            || t.type == TokenType.TOK_A
+            || t.type == TokenType.TOK_X
+            || t.type == TokenType.TOK_Y
+            || t.type == TokenType.TOK_S
+            || t.hasAttribute(TokenAttribute.REGISTER_LABEL)) {
+          hasValidInner = true;
+        }
       }
-      return in.remove(0).type == TokenType.TOK_RPAREN;
+      return parenDepth == 0 && hasValidInner;
     }
   }
 

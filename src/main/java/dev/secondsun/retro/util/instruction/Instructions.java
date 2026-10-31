@@ -20,7 +20,7 @@ public enum Instructions {
 
   ALT3(new GSUInstruction("ALT3")),
 
-  AND_REGISTER(new GSUInstruction("AND", "Rn")),
+  AND_REGISTER(new GSUInstruction("AND", "R1-R15")),
 
   AND_CONST(new GSUInstruction("AND", "#n")),
 
@@ -33,7 +33,7 @@ public enum Instructions {
 
   BGE(new GSUInstruction("BGE", "e")),
 
-  BIC_REGISTER(new GSUInstruction("BIC", "Rn")),
+  BIC_REGISTER(new GSUInstruction("BIC", "R1-R15")),
 
   BIC_CONST(new GSUInstruction("BIC", "#n")),
 
@@ -91,13 +91,13 @@ public enum Instructions {
   MOVE(new GSUInstruction("MOVE", "Rn", "Rn")),
   MOVES(new GSUInstruction("MOVES", "Rn", "Rn")),
 
-  MULT_REGISTER(new GSUInstruction("MULT", "Rn")),
+  MULT_REGISTER(new GSUInstruction("MULT", "R1-R15")),
 
   MULT_CONST(new GSUInstruction("MULT", "#n")),
 
   NOP(new GSUInstruction("NOP")),
   NOT(new GSUInstruction("NOT")),
-  OR_REGISTER(new GSUInstruction("OR", "Rn")),
+  OR_REGISTER(new GSUInstruction("OR", "R1-R15")),
 
   OR_CONST(new GSUInstruction("OR", "#n")),
 
@@ -111,9 +111,13 @@ public enum Instructions {
 
   SBK(new GSUInstruction("SBK")),
   SEX(new GSUInstruction("SEX")),
-  SM(new GSUInstruction("SM", "Rn", "(xx)")),
+  SM(new GSUInstruction("SM", "(xx)", "Rn")),
 
-  SMS(new GSUInstruction("SMS", "Rn", "(yy)")),
+  SM_LEGACY(new GSUInstruction("SM", "Rn", "(xx)")),
+
+  SMS(new GSUInstruction("SMS", "(yy)", "Rn")),
+
+  SMS_LEGACY(new GSUInstruction("SMS", "Rn", "(yy)")),
 
   STB(new GSUInstruction("STB", "(Rm)")),
 
@@ -127,13 +131,13 @@ public enum Instructions {
   SWAP(new GSUInstruction("SWAP")),
   TO(new GSUInstruction("TO", "Rn")),
 
-  UMULT_REGISTER(new GSUInstruction("UMULT", "Rn")),
+  UMULT_REGISTER(new GSUInstruction("UMULT", "R1-R15")),
 
   UMULT_CONST(new GSUInstruction("UMULT", "#n")),
 
   WITH(new GSUInstruction("WITH", "Rn")),
 
-  XOR_REGISTER(new GSUInstruction("XOR", "Rn")),
+  XOR_REGISTER(new GSUInstruction("XOR", "R1-R15")),
 
   XOR_CONST(new GSUInstruction("XOR", "#n"));
 
@@ -145,7 +149,7 @@ public enum Instructions {
   static {
     instructionLookupTable = new HashMap<>(Instructions.values().length);
     for (Instructions i : Instructions.values()) {
-      instructionLookupTable.put(i.instruction.instruction, i);
+      instructionLookupTable.putIfAbsent(i.instruction.instruction, i);
     }
   }
 

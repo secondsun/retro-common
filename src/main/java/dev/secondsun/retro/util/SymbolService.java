@@ -516,7 +516,12 @@ public class SymbolService {
         Scope current = scopeStack.peek();
         for (int tIdx = 1; tIdx < tokenized.size(); tIdx++) {
           Token t = tokenized.get(tIdx);
-          if (t.type == TokenType.TOK_IDENT || t.type == TokenType.TOK_LOCAL_IDENT) {
+          if (t.type == TokenType.TOK_IDENT
+              || t.type == TokenType.TOK_LOCAL_IDENT
+              || t.type == TokenType.TOK_A
+              || t.type == TokenType.TOK_X
+              || t.type == TokenType.TOK_Y
+              || t.type == TokenType.TOK_S) {
             String stringToken = t.text();
             var loc = new Location(fileUri, idx, t.getStartIndex(), t.getEndIndex());
             current.addDefinition(stringToken, loc);

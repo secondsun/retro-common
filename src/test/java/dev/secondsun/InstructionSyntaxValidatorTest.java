@@ -258,4 +258,47 @@ public class InstructionSyntaxValidatorTest {
     var diags = validator.validate(new CA65Scanner().tokenize(code));
     assertFalse(diags.isEmpty());
   }
+
+  @Test
+  public void testSmLmParenthesizedExpressionsAndSingleLetterRegisterVars() {
+    var code =
+        """
+                function test_fn
+                    register a, x, y, s
+                    lm a, (GSU_INIT_FLAG)
+                    lm x, (OBJ_ORDER + 0)
+                    sm (GSU_INIT_FLAG), y
+                    sm (RNC_WORD_BUFFER + rncbuffer::address), s
+                    sms ($10), a
+                    lms y, ($20)
+                endfunction
+                """;
+    var diags = validator.validate(new CA65Scanner().tokenize(code));
+    assertTrue(
+        diags.isEmpty(),
+        "Expected sm/lm expressions and 1-letter register variables (a,x,y,s) to be valid, found: "
+            + diags);
+  }
+
+  @Test
+  public void testR1ToR15OnlyInstructionsRejectR0() {
+    var code =
+        """
+                register zero_var = r0
+                and r0
+                bic r0
+                or r0
+                xor r0
+                mult r0
+                umult r0
+                and zero_var
+                and r1
+                and #5
+                add r0
+                sub r0
+                """;
+    var diags = validator.validate(new CA65Scanner().tokenize(code));
+    assertEquals(7, diags.size(), "Expected 7 INVALID_R0_OPERAND diagnostics, found: " + diags);
+    assertTrue(diags.stream().allMatch(d -> "INVALID_R0_OPERAND".equals(d.code())));
+  }
 }

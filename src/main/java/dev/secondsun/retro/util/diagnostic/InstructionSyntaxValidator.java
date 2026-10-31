@@ -25,9 +25,13 @@ public class InstructionSyntaxValidator {
   private static final Set<String> TWO_ARG_INSTRUCTIONS =
       Set.of("iwt", "ibt", "move", "moves", "lm", "sm", "lms", "sms");
 
+  private static final Set<String> R1_TO_R15_ONLY_INSTRUCTIONS =
+      Set.of("and", "bic", "or", "xor", "mult", "umult");
+
   private static class Scope {
     final Scope parent;
     final Set<String> registerLabels = new HashSet<>();
+    final Map<String, String> precoloredRegisters = new HashMap<>();
 
     Scope(Scope parent) {
       this.parent = parent;
@@ -47,6 +51,23 @@ public class InstructionSyntaxValidator {
       if (name != null && !name.isBlank()) {
         registerLabels.add(name.toLowerCase(Locale.ROOT));
       }
+    }
+
+    void addPrecoloredRegister(String name, String reg) {
+      if (name != null && !name.isBlank() && reg != null && !reg.isBlank()) {
+        precoloredRegisters.put(name.toLowerCase(Locale.ROOT), reg.toLowerCase(Locale.ROOT));
+      }
+    }
+
+    String getPrecoloredRegister(String name) {
+      if (name == null) {
+        return null;
+      }
+      String reg = precoloredRegisters.get(name.toLowerCase(Locale.ROOT));
+      if (reg != null) {
+        return reg;
+      }
+      return parent != null ? parent.getPrecoloredRegister(name) : null;
     }
   }
 
@@ -205,11 +226,21 @@ public class InstructionSyntaxValidator {
 
       // 3. SuperFX GSU Instruction arity & syntax
       if (GSUInstruction.isInstruction(first)) {
-        validateGsuInstruction(tokens, startIdx, lineTokens, uri, lineNum, diagnostics);
+        validateGsuInstruction(tokens, startIdx, lineTokens, scope, uri, lineNum, diagnostics);
       }
     }
 
     return diagnostics;
+  }
+
+  private static boolean isVariableIdentifier(Token t) {
+    return t != null
+        && (t.type == TokenType.TOK_IDENT
+            || t.type == TokenType.TOK_LOCAL_IDENT
+            || t.type == TokenType.TOK_A
+            || t.type == TokenType.TOK_X
+            || t.type == TokenType.TOK_Y
+            || t.type == TokenType.TOK_S);
   }
 
   private int findStartIdx(List<Token> tokens) {
@@ -242,8 +273,9 @@ public class InstructionSyntaxValidator {
     int i = startIdx + 1;
     while (i < tokens.size()) {
       Token t = tokens.get(i);
-      if (t.type == TokenType.TOK_IDENT || t.type == TokenType.TOK_LOCAL_IDENT) {
-        currentScope.addRegisterLabel(t.text());
+      if (isVariableIdentifier(t)) {
+        String varName = t.text();
+        currentScope.addRegisterLabel(varName);
         t.addAttribute(TokenAttribute.REGISTER_LABEL);
         i++;
         if (i < tokens.size()) {
@@ -252,6 +284,9 @@ public class InstructionSyntaxValidator {
               || next.type == TokenType.TOK_ASSIGN
               || "=".equals(next.text())) {
             i++;
+            if (i < tokens.size() && tokens.get(i).type != TokenType.TOK_COMMA) {
+              currentScope.addPrecoloredRegister(varName, tokens.get(i).text());
+            }
             while (i < tokens.size() && tokens.get(i).type != TokenType.TOK_COMMA) {
               i++;
             }
@@ -283,7 +318,7 @@ public class InstructionSyntaxValidator {
     while (i < tokens.size()) {
       Token t = tokens.get(i);
       if (expectIdent) {
-        if (t.type == TokenType.TOK_IDENT || t.type == TokenType.TOK_LOCAL_IDENT) {
+        if (isVariableIdentifier(t)) {
           expectIdent = false;
           i++;
           if (i < tokens.size()) {
@@ -352,12 +387,35 @@ public class InstructionSyntaxValidator {
       List<Token> tokens,
       int startIdx,
       Tokens lineTokens,
+      Scope scope,
       URI uri,
       int lineNum,
       List<SyntaxDiagnostic> diagnostics) {
 
     Token opcodeToken = tokens.get(startIdx);
     String mnemonic = opcodeToken.text().toLowerCase(Locale.ROOT);
+
+    // Check R1..R15-only instructions (and, bic, or, xor, mult, umult) against r0
+    if (R1_TO_R15_ONLY_INSTRUCTIONS.contains(mnemonic) && startIdx + 1 < tokens.size()) {
+      Token firstArg = tokens.get(startIdx + 1);
+      if (firstArg.type != TokenType.TOK_HASH) {
+        String argText = firstArg.text();
+        String precolored = scope != null ? scope.getPrecoloredRegister(argText) : null;
+        if ("r0".equalsIgnoreCase(argText) || "r0".equalsIgnoreCase(precolored)) {
+          diagnostics.add(
+              SyntaxDiagnostic.error(
+                  uri,
+                  lineNum,
+                  firstArg.getStartIndex(),
+                  firstArg.getEndIndex(),
+                  "INVALID_R0_OPERAND",
+                  String.format(
+                      "Instruction '%s' only accepts registers R1-R15 (found '%s'). In SuperFX hardware, '%s r0' is not a valid register encoding (e.g. 'and r0' encodes $70 = 'merge', which is unsupported on FX3).",
+                      opcodeToken.text(), argText, mnemonic)));
+          return;
+        }
+      }
+    }
 
     // Sub-tokens starting from the opcode
     List<Token> subTokensList = tokens.subList(startIdx, tokens.size());
