@@ -16,6 +16,8 @@ import java.util.*;
  */
 public class InstructionSyntaxValidator {
 
+  private final AnonymousLabelValidator anonymousLabelValidator = new AnonymousLabelValidator();
+
   private static final Set<String> ZERO_ARG_INSTRUCTIONS =
       Set.of(
           "nop", "stop", "cache", "cmode", "color", "div2", "fmult", "lmult", "lob", "hib", "loop",
@@ -229,6 +231,8 @@ public class InstructionSyntaxValidator {
         validateGsuInstruction(tokens, startIdx, lineTokens, scope, uri, lineNum, diagnostics);
       }
     }
+
+    diagnostics.addAll(anonymousLabelValidator.validate(file));
 
     return diagnostics;
   }

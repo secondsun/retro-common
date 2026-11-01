@@ -203,16 +203,34 @@ public class InstructionSyntaxValidatorTest {
   public void testAnonymousLabelBranchOperands() {
     var code =
         """
+                :
                 :       wai
                         bra :-
                         beq :--
                         bne :+
                         bra :++
+                :
                 :       nop
                 """;
     var file = new CA65Scanner().tokenize(code);
     List<SyntaxDiagnostic> diags = validator.validate(file);
     assertTrue(diags.isEmpty(), "Anonymous label branch targets are valid ca65, found: " + diags);
+  }
+
+  @Test
+  public void testMissingAnonymousLabelDiagnostics() {
+    var code =
+        """
+                bne :++
+                beq :-
+                """;
+    var file = new CA65Scanner().tokenize(code);
+    List<SyntaxDiagnostic> diags = validator.validate(file);
+    assertEquals(2, diags.size(), "Expected 2 missing anonymous label errors, found: " + diags);
+    assertEquals("ANONYMOUS_LABEL_NOT_FOUND", diags.get(0).code());
+    assertEquals("Target anonymous label ':++' does not exist", diags.get(0).message());
+    assertEquals("ANONYMOUS_LABEL_NOT_FOUND", diags.get(1).code());
+    assertEquals("Target anonymous label ':-' does not exist", diags.get(1).message());
   }
 
   @Test
