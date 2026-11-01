@@ -301,4 +301,30 @@ public class InstructionSyntaxValidatorTest {
     assertEquals(7, diags.size(), "Expected 7 INVALID_R0_OPERAND diagnostics, found: " + diags);
     assertTrue(diags.stream().allMatch(d -> "INVALID_R0_OPERAND".equals(d.code())));
   }
+
+  @Test
+  public void testPrecoloredSingleLetterRegistersAndSymbolicAddresses() {
+    var code =
+        """
+                register y = r2
+                register x, xMin
+                move x, r0
+                from y
+                inc y
+                hib
+                if_lt x, y, nop
+                sm (GSU_INIT_FLAG), r1
+                lm r3, (OBJ_ORDER + 2)
+                """;
+    var diags = validator.validate(new CA65Scanner().tokenize(code));
+    assertTrue(diags.isEmpty(), "Expected no diagnostics, found: " + diags);
+  }
+
+  @Test
+  public void testMalformedLmSmStillReported() {
+    var diags = validator.validate(new CA65Scanner().tokenize("lm (ADDR)\n"));
+    assertEquals(1, diags.size(), diags.toString());
+    diags = validator.validate(new CA65Scanner().tokenize("sm r1, (ADDR)\n"));
+    assertEquals(1, diags.size(), diags.toString());
+  }
 }

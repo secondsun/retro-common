@@ -113,8 +113,6 @@ public enum Instructions {
   SEX(new GSUInstruction("SEX")),
   SM(new GSUInstruction("SM", "(xx)", "Rn")),
 
-  SM_LEGACY(new GSUInstruction("SM", "Rn", "(xx)")),
-
   SMS(new GSUInstruction("SMS", "(yy)", "Rn")),
 
   SMS_LEGACY(new GSUInstruction("SMS", "Rn", "(yy)")),
