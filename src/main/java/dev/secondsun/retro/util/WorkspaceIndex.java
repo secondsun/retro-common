@@ -131,6 +131,46 @@ public interface WorkspaceIndex {
   List<Location> resolveLocations(String symbol, URI callingUri, Integer line);
 
   /**
+   * Finds all references/usages of a symbol across the workspace index (excluding definitions).
+   *
+   * @param symbol symbol identifier to search for
+   * @param callingUri optional contextual calling URI
+   * @param line optional contextual line number (0-based)
+   * @return list of reference locations
+   */
+  default List<Location> findReferences(String symbol, URI callingUri, Integer line) {
+    return findReferences(symbol, callingUri, line, false);
+  }
+
+  /**
+   * Finds all references/usages of a symbol across the workspace index.
+   *
+   * @param symbol symbol identifier to search for
+   * @param callingUri optional contextual calling URI
+   * @param line optional contextual line number (0-based)
+   * @param includeDefinitions whether to include definitions in the results
+   * @return list of reference locations
+   */
+  default List<Location> findReferences(
+      String symbol, URI callingUri, Integer line, boolean includeDefinitions) {
+    return findDetailedReferences(symbol, callingUri, line, includeDefinitions).stream()
+        .map(dev.secondsun.retro.util.vo.SymbolReference::toLocation)
+        .toList();
+  }
+
+  /**
+   * Finds all detailed references of a symbol across the workspace index.
+   *
+   * @param symbol symbol identifier to search for
+   * @param callingUri optional contextual calling URI
+   * @param line optional contextual line number (0-based)
+   * @param includeDefinitions whether to include definitions in the results
+   * @return list of detailed symbol references
+   */
+  List<dev.secondsun.retro.util.vo.SymbolReference> findDetailedReferences(
+      String symbol, URI callingUri, Integer line, boolean includeDefinitions);
+
+  /**
    * Resolves documentation for a symbol, checking contextual scope first before falling back to
    * global docs.
    *

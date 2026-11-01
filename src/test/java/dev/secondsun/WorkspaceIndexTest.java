@@ -160,4 +160,148 @@ public class WorkspaceIndexTest {
     }
     executor.shutdown();
   }
+
+  @Test
+  public void testFindReferencesBasicAndClassification() {
+    URI uri = tempDir.resolve("math.s").toUri();
+    String code =
+        """
+        function computeSum
+            stw (targetVar)
+            ldw (sourceVar)
+            call computeSum
+            return
+        endfunction
+        """;
+    workspaceIndex.updateFileContents(uri, code);
+
+    // Call without definitions
+    var refs = workspaceIndex.findDetailedReferences("computeSum", null, null, false);
+    assertEquals(1, refs.size());
+    assertEquals("call", refs.get(0).kind());
+    assertEquals(3, refs.get(0).line());
+
+    // With definitions
+    var all = workspaceIndex.findDetailedReferences("computeSum", null, null, true);
+    assertEquals(2, all.size());
+    assertEquals("definition", all.get(0).kind());
+    assertEquals("call", all.get(1).kind());
+
+    // Writes and reads
+    var writeRefs = workspaceIndex.findDetailedReferences("targetVar", null, null, false);
+    assertEquals(1, writeRefs.size());
+    assertEquals("write", writeRefs.get(0).kind());
+
+    var readRefs = workspaceIndex.findDetailedReferences("sourceVar", null, null, false);
+    assertEquals(1, readRefs.size());
+    assertEquals("read", readRefs.get(0).kind());
+  }
+
+  @Test
+  public void testSymbolOnlyInCommentOrStringIgnored() {
+    URI uri = tempDir.resolve("comments.s").toUri();
+    String code =
+        """
+        ; This is a comment about unused_sym
+        .asciiz "unused_sym in a string literal"
+        nop
+        """;
+    workspaceIndex.updateFileContents(uri, code);
+
+    var refs = workspaceIndex.findReferences("unused_sym", null, null);
+    assertTrue(refs.isEmpty());
+  }
+
+  @Test
+  public void testCheapLocalLabelScopingDisambiguation() {
+    URI uri1 = tempDir.resolve("func1.s").toUri();
+    String code1 =
+        """
+        function funcOne
+        @loop:
+            bra @loop
+            return
+        endfunction
+        """;
+    URI uri2 = tempDir.resolve("func2.s").toUri();
+    String code2 =
+        """
+        function funcTwo
+        @loop:
+            bra @loop
+            return
+        endfunction
+        """;
+    workspaceIndex.updateFileContents(uri1, code1);
+    workspaceIndex.updateFileContents(uri2, code2);
+
+    // Without URI/line context, both @loop labels match
+    var allRefs = workspaceIndex.findDetailedReferences("@loop", null, null, false);
+    assertEquals(2, allRefs.size());
+
+    // With URI/line scoped to funcOne (line 1 of func1.s), only funcOne's @loop is returned
+    var scopedRefs = workspaceIndex.findDetailedReferences("@loop", uri1, 1, false);
+    assertEquals(1, scopedRefs.size());
+    assertEquals(uri1, scopedRefs.get(0).filename());
+    assertEquals(2, scopedRefs.get(0).line());
+  }
+
+  @Test
+  public void testStructFieldDisambiguation() {
+    URI uri = tempDir.resolve("structs.s").toUri();
+    String code =
+        """
+        .struct structA
+            fieldA .byte
+            drop_ns .byte
+        .endstruct
+
+        .struct structB
+            fieldB .word
+            drop_ns .word
+        .endstruct
+
+        main:
+            iwt r1, #structB::drop_ns
+            iwt r2, #structA::drop_ns
+            nop
+        """;
+    workspaceIndex.updateFileContents(uri, code);
+
+    // Without context, searching drop_ns returns both uses
+    var allRefs = workspaceIndex.findDetailedReferences("drop_ns", null, null, false);
+    assertEquals(2, allRefs.size());
+
+    // Scoped to structB's definition of drop_ns (line 7)
+    var structBRefs = workspaceIndex.findDetailedReferences("drop_ns", uri, 7, false);
+    assertEquals(1, structBRefs.size());
+    assertEquals(11, structBRefs.get(0).line());
+
+    // Searching specifically by qualified name
+    var qualifiedRefs =
+        workspaceIndex.findDetailedReferences("structA::drop_ns", null, null, false);
+    assertEquals(1, qualifiedRefs.size());
+    assertEquals(12, qualifiedRefs.get(0).line());
+  }
+
+  @Test
+  public void testIndexStaysCorrectAfterFileEditAndDelete() {
+    URI uri = tempDir.resolve("dynamic.s").toUri();
+    workspaceIndex.updateFileContents(uri, "call targetSym\n");
+
+    var refs1 = workspaceIndex.findReferences("targetSym", null, null);
+    assertEquals(1, refs1.size());
+
+    // Update file: targetSym changed to otherSym
+    workspaceIndex.updateFileContents(uri, "call otherSym\n");
+    var refs2 = workspaceIndex.findReferences("targetSym", null, null);
+    assertEquals(0, refs2.size());
+    var refsOther = workspaceIndex.findReferences("otherSym", null, null);
+    assertEquals(1, refsOther.size());
+
+    // Remove file completely
+    workspaceIndex.removeFile(uri);
+    var refsAfterDelete = workspaceIndex.findReferences("otherSym", null, null);
+    assertEquals(0, refsAfterDelete.size());
+  }
 }

@@ -381,7 +381,11 @@ public class SymbolService {
           scopeStack.peek().addDefinition(fnName, loc);
           globalScope.addDefinition(fnName, loc);
           recordDefinition(fnName, loc);
+          scopeStack.peek().addDefinition(fnName + "_function", loc);
+          globalScope.addDefinition(fnName + "_function", loc);
+          recordDefinition(fnName + "_function", loc);
           extractDoc(file, idx, fnName, scopeStack.peek());
+          extractDoc(file, idx, fnName + "_function", scopeStack.peek());
 
           var fnScope = new Scope(fnName, ScopeType.FUNCTION, fileUri, idx, scopeStack.peek());
           scopeStack.push(fnScope);
@@ -496,6 +500,24 @@ public class SymbolService {
           && (tokenized.get(1).type == TokenType.TOK_EQ
               || tokenized.get(1).type == TokenType.TOK_ASSIGN)) {
         var token = tokenized.get(0);
+        var stringToken = token.text();
+        var loc = new Location(fileUri, idx, token.getStartIndex(), token.getEndIndex());
+        Scope current = scopeStack.peek();
+        current.addDefinition(stringToken, loc);
+        if (current.type() == ScopeType.FILE || current.type() == ScopeType.GLOBAL) {
+          globalScope.addDefinition(stringToken, loc);
+        } else if (!current.name().isEmpty()) {
+          recordDefinition(current.name() + "::" + stringToken, loc);
+        }
+        recordDefinition(stringToken, loc);
+        extractDoc(file, idx, stringToken, current);
+        continue;
+      }
+
+      // 2b. Define (.define FOO ...)
+      if (tokenized.size() > 1
+          && (first.type == TokenType.TOK_DEFINE || ".define".equalsIgnoreCase(first.text()))) {
+        var token = tokenized.get(1);
         var stringToken = token.text();
         var loc = new Location(fileUri, idx, token.getStartIndex(), token.getEndIndex());
         Scope current = scopeStack.peek();
