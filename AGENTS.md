@@ -36,12 +36,13 @@ Always use the Maven Wrapper (`./mvnw`) rather than system `mvn`:
   ```
 - **Full Verification (Packaging & Enforcer Checks)**:
   ```bash
-  ./mvnw clean verify -DskipGpg=true
+  ./mvnw clean verify -Dgpg.skip=true
   ```
 - **Local Install (for consuming libraries like sfx-optimizer)**:
   ```bash
-  ./mvnw clean install -DskipGpg=true
+  ./mvnw clean install -Dgpg.skip=true
   ```
+  *(Or run `./tools/install-local.sh` from the umbrella workspace root to compile and install all upstream libraries locally)*
 - **Deploy to Maven Central**:
   ```bash
   ./mvnw clean deploy
@@ -58,6 +59,8 @@ Follow the Elephant and Goldfish separation of concerns:
   - `dev.secondsun.retro.util.Util`: Pure helper routines for string stripping, comment extraction, and URI normalization.
   - *Invariant*: Keep these classes pure, thread-safe, and independent of disk/workspace state. No mocking needed for tests.
 - **Elephant (Stateful & Persistent)**:
+  - `dev.secondsun.retro.util.WorkspaceIndex` / `DefaultWorkspaceIndex`: Coordinates file loading, in-memory buffer precedence, workspace sandbox confinement, on-demand directory inclusion, and scoped symbol resolution.
+  - `dev.secondsun.retro.util.ReferenceService`: Workspace-wide reference engine classifying symbol usages (`call`, `read`, `write`, `macro-invocation`, `use`) and disambiguating scoped symbols.
   - `dev.secondsun.retro.util.ProjectService`: Coordinates workspace discovery and file ingestion.
   - `dev.secondsun.retro.util.FileService`: Handles search paths and file reading via `java.net.URI`.
   - `dev.secondsun.retro.util.SymbolService`: Stores symbol locations, scopes, documentation, and definitions.

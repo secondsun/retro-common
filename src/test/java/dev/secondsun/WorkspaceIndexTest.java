@@ -371,4 +371,86 @@ public class WorkspaceIndexTest {
     assertNull(symbolService.getLocation("shared_symbol"));
     assertTrue(symbolService.getLocations("shared_symbol").isEmpty());
   }
+
+  @Test
+  public void testFindReferencesFromTopLevelFunctionDeclarationAcrossFilesAndFixtures()
+      throws IOException {
+    Path realDir = tempDir.resolve("snes-sfx-demo/X-GSU/gsu_maths");
+    Path fixtureDir = tempDir.resolve("retro-lsp/src/test/resources/X-GSU/gsu_maths");
+    Files.createDirectories(realDir);
+    Files.createDirectories(fixtureDir);
+
+    String sqrtCode =
+        """
+        function gsu_sqrt32 dividendhi, dividendlo : root
+            register partial_dividend
+            with dividendhi
+            rol
+            return root
+        endfunction
+        """;
+    String vectorCode =
+        """
+        function vector3_length v1 : len
+            register val, mult_lo
+            call gsu_sqrt32 val, mult_lo : len
+            return len
+        endfunction
+        """;
+
+    Path realSqrt = realDir.resolve("gsu_sqrt.i");
+    Path realVector = realDir.resolve("gsu_vector.i");
+    Path fixtureSqrt = fixtureDir.resolve("gsu_sqrt.i");
+
+    Files.writeString(realSqrt, sqrtCode);
+    Files.writeString(realVector, vectorCode);
+    Files.writeString(fixtureSqrt, sqrtCode);
+
+    // Index real first, then fixture (so fixture is indexed last)
+    workspaceIndex.includeDir(realDir.toUri());
+    workspaceIndex.includeDir(fixtureDir.toUri());
+
+    TokenizedFile sqrtFile = workspaceIndex.getFileContents(realSqrt.toUri());
+    assertNotNull(sqrtFile);
+
+    // Cursor on "gsu_sqrt32" at line 0, column 12 of gsu_sqrt.i (excluding definitions)
+    List<Location> refs = workspaceIndex.findReferencesAt(sqrtFile, realSqrt.toUri(), 0, 12, false);
+    assertEquals(1, refs.size());
+    assertEquals(realVector.toUri(), refs.get(0).filename());
+    assertEquals(2, refs.get(0).line());
+
+    // Including definitions: real definitions/usages outrank fixture definitions
+    List<Location> refsWithDefs =
+        workspaceIndex.findReferencesAt(sqrtFile, realSqrt.toUri(), 0, 12, true);
+    assertTrue(refsWithDefs.size() >= 2);
+    assertFalse(refsWithDefs.get(0).filename().toString().contains("/src/test/resources/"));
+
+    // Cursor on parameter "dividendhi" at line 0, column 22 -> scoped only to gsu_sqrt.i
+    List<Location> paramRefs =
+        workspaceIndex.findReferencesAt(sqrtFile, realSqrt.toUri(), 0, 22, false);
+    assertEquals(1, paramRefs.size());
+    assertEquals(realSqrt.toUri(), paramRefs.get(0).filename());
+    assertEquals(2, paramRefs.get(0).line());
+
+    // ReferenceService structured result
+    var result =
+        workspaceIndex.findReferencesResult(
+            "gsu_sqrt32", null, realSqrt.toUri().toString(), 0, "snes-sfx-demo/", 10, false, 1);
+    assertEquals(1, result.totalReferences());
+    assertEquals("snes-sfx-demo/X-GSU/gsu_maths/gsu_vector.i", result.references().get(0).path());
+    assertEquals("call", result.references().get(0).kind());
+    assertTrue(result.references().get(0).text().contains("call gsu_sqrt32"));
+  }
+
+  @Test
+  public void testResolveFileNonExistentRootUriDoesNotIndexFilesystemRoot() {
+    WorkspaceIndex index = new DefaultWorkspaceIndex();
+    List<Path> indexedPaths = new ArrayList<>();
+    index.setDirectoryIndexedListener(indexedPaths::add);
+
+    TokenizedFile result = index.resolveFile(URI.create("file:///nonexistent_root_test.s"), null);
+
+    assertEquals(TokenizedFile.EMPTY, result);
+    assertTrue(indexedPaths.isEmpty());
+  }
 }

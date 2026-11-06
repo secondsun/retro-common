@@ -171,6 +171,85 @@ public interface WorkspaceIndex {
       String symbol, URI callingUri, Integer line, boolean includeDefinitions);
 
   /**
+   * Resolves the symbol name at the given 0-based line and column in a tokenized file.
+   *
+   * @param file tokenized source file
+   * @param line 0-based line index
+   * @param column 0-based character column index
+   * @return optional symbol string, or empty if no symbol is present at the cursor
+   */
+  default Optional<String> resolveSymbolAt(TokenizedFile file, int line, int column) {
+    return getReferenceService().resolveSymbolAt(file, line, column);
+  }
+
+  /**
+   * Finds all detailed symbol references at the given cursor position in a file.
+   *
+   * @param file tokenized file content
+   * @param uri file URI
+   * @param line 0-based cursor line index
+   * @param column 0-based cursor column index
+   * @param includeDefinitions whether to include symbol definitions in the returned list
+   * @return list of detailed symbol references
+   */
+  default List<dev.secondsun.retro.util.vo.SymbolReference> findDetailedReferencesAt(
+      TokenizedFile file, URI uri, int line, int column, boolean includeDefinitions) {
+    return getReferenceService()
+        .findDetailedReferencesAt(file, uri, line, column, includeDefinitions);
+  }
+
+  /**
+   * Finds all reference locations at the given cursor position in a file.
+   *
+   * @param file tokenized file content
+   * @param uri file URI
+   * @param line 0-based cursor line index
+   * @param column 0-based cursor column index
+   * @param includeDefinitions whether to include symbol definitions in the returned list
+   * @return list of reference {@link Location}s
+   */
+  default List<Location> findReferencesAt(
+      TokenizedFile file, URI uri, int line, int column, boolean includeDefinitions) {
+    return getReferenceService().findReferencesAt(file, uri, line, column, includeDefinitions);
+  }
+
+  /**
+   * Executes a full symbol reference search with optional inline code resolution, path filtering,
+   * result capping, and ambiguity reporting.
+   *
+   * @param symbol name of the symbol to find
+   * @param code optional assembly source code to resolve context from
+   * @param uriStr optional document URI string
+   * @param line optional line number for lexical scope disambiguation
+   * @param pathFilter optional workspace-relative path or directory filter
+   * @param maxResults maximum number of reference locations to return
+   * @param includeDefinitions whether to include definition sites in results
+   * @param contextLines when {@code > 0}, includes the source line text for each reference
+   * @return structured {@link ReferenceService.ReferenceResult}
+   */
+  default ReferenceService.ReferenceResult findReferencesResult(
+      String symbol,
+      String code,
+      String uriStr,
+      Integer line,
+      String pathFilter,
+      Integer maxResults,
+      Boolean includeDefinitions,
+      Integer contextLines) {
+    return getReferenceService()
+        .find(symbol, code, uriStr, line, pathFilter, maxResults, includeDefinitions, contextLines);
+  }
+
+  /**
+   * Returns the {@link ReferenceService} associated with this workspace index.
+   *
+   * @return reference service
+   */
+  default ReferenceService getReferenceService() {
+    return new ReferenceService(this);
+  }
+
+  /**
    * Resolves documentation for a symbol, checking contextual scope first before falling back to
    * global docs.
    *

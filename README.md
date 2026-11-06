@@ -172,6 +172,7 @@ String doc = symbolService.getDocumentation("loop", file.uri(), currentLine);
 - `FunctionSyntaxHelper.java`: Syntax validator and parser helper for pseudo-macro statements.
 - `FileService.java`: Manages file discovery and reading, supporting search paths and URI-based file access.
 - `ProjectService.java`: High-level service that initializes workspace directories and coordinates symbol extraction.
+- `ReferenceService.java`: Workspace-wide symbol reference and usage resolver supporting both symbol-name queries and cursor-position queries (`textDocument/references`), lexical scope disambiguation, and priority ranking.
 - `SymbolService.java`: Tracks and manages symbol definitions and lexical scopes, providing context-aware symbol and documentation resolution.
 - `Util.java`: General-purpose utilities for string manipulation, URI normalization, and comment removal.
 - `Token.java`, `TokenType.java`, `TokenAttribute.java`: Define token structures, keyword types, and attribute sets (such as `TokenAttribute.ERROR`).

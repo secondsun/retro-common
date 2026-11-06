@@ -93,6 +93,14 @@ public class Scope {
 
   public void addDefinition(String name, Location location) {
     if (name != null && location != null) {
+      if (this.type == ScopeType.GLOBAL) {
+        Location existing = definitions.get(name);
+        if (existing != null
+            && !dev.secondsun.retro.util.ReferenceService.isLowPriority(existing.filename())
+            && dev.secondsun.retro.util.ReferenceService.isLowPriority(location.filename())) {
+          return;
+        }
+      }
       definitions.put(name, location);
     }
   }

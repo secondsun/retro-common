@@ -656,8 +656,17 @@ public class SymbolService {
   }
 
   private void recordDefinition(String name, Location location) {
-    definitions.put(name, location);
-    allDefinitionsByName.computeIfAbsent(name, k -> new ArrayList<>()).add(location);
+    Location existing = definitions.get(name);
+    if (existing == null
+        || ReferenceService.isLowPriority(existing.filename())
+        || !ReferenceService.isLowPriority(location != null ? location.filename() : null)) {
+      definitions.put(name, location);
+    }
+    List<Location> list = allDefinitionsByName.computeIfAbsent(name, k -> new ArrayList<>());
+    list.add(location);
+    list.sort(
+        Comparator.comparingInt(
+            loc -> ReferenceService.isLowPriority(loc != null ? loc.filename() : null) ? 1 : 0));
     if (location != null && location.filename() != null) {
       filesToSymbols.computeIfAbsent(location.filename(), k -> new HashSet<>()).add(name);
     }
