@@ -97,6 +97,12 @@ public class Scope {
     }
   }
 
+  public void removeDefinition(String name) {
+    if (name != null) {
+      definitions.remove(name);
+    }
+  }
+
   public void addDocumentation(String name, String docs) {
     if (name != null && docs != null) {
       documentations.put(name, docs);

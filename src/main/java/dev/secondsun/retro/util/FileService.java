@@ -11,7 +11,7 @@ import java.util.logging.Logger;
 
 public class FileService {
 
-  private Set<URI> repositories = new HashSet<>();
+  private Set<URI> repositories = java.util.concurrent.ConcurrentHashMap.newKeySet();
   private static final Logger LOG = Logger.getLogger(FileService.class.getName());
 
   public FileService addSearchPath(URI repoURI) {

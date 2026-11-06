@@ -212,7 +212,7 @@ public class DefaultWorkspaceIndex implements WorkspaceIndex {
   }
 
   @Override
-  public synchronized void includeDir(URI directory) {
+  public void includeDir(URI directory) {
     if (directory == null) {
       return;
     }
@@ -308,7 +308,9 @@ public class DefaultWorkspaceIndex implements WorkspaceIndex {
                       && !dir.getName().equals("target")
                       && !dir.getName().equals("dist")
                       && !dir.getName().equals("out")
-                      && !dir.getName().equals("build"))
+                      && !dir.getName().equals("build")
+                      && !dir.getName().equals("tools")
+                      && !dir.getName().equals("build_tools"))
           .map(File::toURI)
           .forEach(this::_includeDir);
     }

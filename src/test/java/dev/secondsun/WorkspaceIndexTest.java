@@ -304,4 +304,71 @@ public class WorkspaceIndexTest {
     var refsAfterDelete = workspaceIndex.findReferences("otherSym", null, null);
     assertEquals(0, refsAfterDelete.size());
   }
+
+  @Test
+  public void testIncludeDirSkipsToolsAndBuildToolsSubdirectories() throws IOException {
+    Path srcDir = tempDir.resolve("src");
+    Path toolsDir = tempDir.resolve("tools");
+    Path buildToolsDir = tempDir.resolve("build_tools");
+    Files.createDirectories(srcDir);
+    Files.createDirectories(toolsDir);
+    Files.createDirectories(buildToolsDir);
+
+    Files.writeString(srcDir.resolve("code.s"), "src_symbol:\n  nop\n");
+    Files.writeString(toolsDir.resolve("tool.s"), "tools_symbol:\n  nop\n");
+    Files.writeString(buildToolsDir.resolve("build_tool.s"), "build_tools_symbol:\n  nop\n");
+
+    workspaceIndex.includeDir(tempDir.toUri());
+
+    // src_symbol should be discovered
+    assertNotNull(workspaceIndex.resolveLocation("src_symbol", null, 0));
+
+    // tools and build_tools subdirectories should be skipped during recursive traversal
+    assertNull(workspaceIndex.resolveLocation("tools_symbol", null, 0));
+    assertNull(workspaceIndex.resolveLocation("build_tools_symbol", null, 0));
+
+    // Explicitly indexing tools directory should still work
+    workspaceIndex.includeDir(toolsDir.toUri());
+    assertNotNull(workspaceIndex.resolveLocation("tools_symbol", null, 0));
+  }
+
+  @Test
+  public void testSymbolServiceRemoveFileWithReverseIndex() {
+    URI file1Uri = URI.create("file:///test/file1.s");
+    URI file2Uri = URI.create("file:///test/file2.s");
+
+    Location sharedLoc1 = new Location(file1Uri, 10, 0, 13);
+    Location sharedLoc2 = new Location(file2Uri, 20, 0, 13);
+    Location uniqueLoc1 = new Location(file1Uri, 5, 0, 15);
+
+    symbolService.addDefinition("shared_symbol", sharedLoc1);
+    symbolService.addDefinition("shared_symbol", sharedLoc2);
+    symbolService.addDefinition("unique_to_file1", uniqueLoc1);
+
+    assertEquals(2, symbolService.getLocations("shared_symbol").size());
+    assertNotNull(symbolService.getLocation("shared_symbol"));
+    assertNotNull(symbolService.getLocation("unique_to_file1"));
+
+    // Remove file 1
+    symbolService.removeFile(file1Uri);
+
+    // unique_to_file1 should be completely removed
+    assertNull(symbolService.getLocation("unique_to_file1"));
+    assertTrue(symbolService.getLocations("unique_to_file1").isEmpty());
+
+    // shared_symbol should still have definition from file 2
+    List<Location> remainingShared = symbolService.getLocations("shared_symbol");
+    assertEquals(1, remainingShared.size());
+    assertEquals(file2Uri, remainingShared.get(0).filename());
+    assertEquals(file2Uri, symbolService.getLocation("shared_symbol").filename());
+
+    // Removing file 1 again should be a clean no-op
+    symbolService.removeFile(file1Uri);
+    assertEquals(1, symbolService.getLocations("shared_symbol").size());
+
+    // Removing file 2 should clean up shared_symbol
+    symbolService.removeFile(file2Uri);
+    assertNull(symbolService.getLocation("shared_symbol"));
+    assertTrue(symbolService.getLocations("shared_symbol").isEmpty());
+  }
 }

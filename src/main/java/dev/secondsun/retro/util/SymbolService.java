@@ -22,8 +22,9 @@ public class SymbolService {
       new Scope("<global>", ScopeType.GLOBAL, null, 0, Integer.MAX_VALUE, null);
   private final Map<URI, Scope> fileScopes = new HashMap<>();
   private final Map<String, List<Location>> allDefinitionsByName = new HashMap<>();
+  private final Map<URI, Set<String>> filesToSymbols = new HashMap<>();
 
-  public void addDefinition(String name, Location location) {
+  public synchronized void addDefinition(String name, Location location) {
     if (name == null || location == null) {
       return;
     }
@@ -40,7 +41,7 @@ public class SymbolService {
     }
   }
 
-  public Location getLocation(String name) {
+  public synchronized Location getLocation(String name) {
     if (name == null || name.isBlank()) {
       return null;
     }
@@ -56,7 +57,7 @@ public class SymbolService {
    * Searches from the innermost lexical scope outward to parent scopes, falling back to global
    * definitions.
    */
-  public Location getLocation(String name, URI uri, int line) {
+  public synchronized Location getLocation(String name, URI uri, int line) {
     if (name == null || name.isBlank()) {
       return null;
     }
@@ -74,7 +75,7 @@ public class SymbolService {
    * Resolves a symbol definition within the context of a given location (e.g. cursor or reference
    * site).
    */
-  public Location getLocation(String name, Location context) {
+  public synchronized Location getLocation(String name, Location context) {
     if (context == null) {
       return getLocation(name);
     }
@@ -82,7 +83,7 @@ public class SymbolService {
   }
 
   /** Resolves a symbol definition for a token at a file URI. */
-  public Location getLocation(Token token, URI uri) {
+  public synchronized Location getLocation(Token token, URI uri) {
     if (token == null) {
       return null;
     }
@@ -90,7 +91,7 @@ public class SymbolService {
   }
 
   /** Resolves a symbol definition for a token within a tokenized file. */
-  public Location getLocation(Token token, TokenizedFile file) {
+  public synchronized Location getLocation(Token token, TokenizedFile file) {
     if (token == null) {
       return null;
     }
@@ -99,7 +100,7 @@ public class SymbolService {
   }
 
   /** Returns all known definition locations for a symbol name across all scopes. */
-  public List<Location> getLocations(String name) {
+  public synchronized List<Location> getLocations(String name) {
     if (name == null || name.isBlank()) {
       return List.of();
     }
@@ -119,7 +120,7 @@ public class SymbolService {
    * Returns definition locations for a symbol name, prioritizing the lexical scope at the given
    * context.
    */
-  public List<Location> getLocations(String name, URI uri, int line) {
+  public synchronized List<Location> getLocations(String name, URI uri, int line) {
     if (name == null || name.isBlank()) {
       return List.of();
     }
@@ -134,7 +135,7 @@ public class SymbolService {
   }
 
   /** Returns definition locations for a symbol name prioritizing the given context location. */
-  public List<Location> getLocations(String name, Location context) {
+  public synchronized List<Location> getLocations(String name, Location context) {
     if (context == null) {
       return getLocations(name);
     }
@@ -142,7 +143,7 @@ public class SymbolService {
   }
 
   /** Returns definition locations for a token in a file URI. */
-  public List<Location> getLocations(Token token, URI uri) {
+  public synchronized List<Location> getLocations(Token token, URI uri) {
     if (token == null) {
       return List.of();
     }
@@ -150,7 +151,7 @@ public class SymbolService {
   }
 
   /** Returns definition locations for a token in a tokenized file. */
-  public List<Location> getLocations(Token token, TokenizedFile file) {
+  public synchronized List<Location> getLocations(Token token, TokenizedFile file) {
     if (token == null) {
       return List.of();
     }
@@ -158,14 +159,14 @@ public class SymbolService {
     return getLocations(token.text(), uri, token.lineNumber);
   }
 
-  public void addDocumentation(String name, String docs) {
+  public synchronized void addDocumentation(String name, String docs) {
     if (name != null && docs != null) {
       documentations.put(name, docs);
       globalScope.addDocumentation(name, docs);
     }
   }
 
-  public String getDocumentation(String name) {
+  public synchronized String getDocumentation(String name) {
     if (name == null) {
       return null;
     }
@@ -179,7 +180,7 @@ public class SymbolService {
   /**
    * Retrieves documentation for a symbol name resolved within the context of a file URI and line.
    */
-  public String getDocumentation(String name, URI uri, int line) {
+  public synchronized String getDocumentation(String name, URI uri, int line) {
     if (name == null || name.isBlank()) {
       return null;
     }
@@ -194,14 +195,14 @@ public class SymbolService {
   }
 
   /** Retrieves documentation for a symbol name resolved within the given context location. */
-  public String getDocumentation(String name, Location context) {
+  public synchronized String getDocumentation(String name, Location context) {
     if (context == null) {
       return getDocumentation(name);
     }
     return getDocumentation(name, context.filename(), context.line());
   }
 
-  public String getRawDocumentation(String name) {
+  public synchronized String getRawDocumentation(String name) {
     if (name == null) {
       return null;
     }
@@ -216,7 +217,7 @@ public class SymbolService {
    * Retrieves raw documentation for a symbol name resolved within the context of a file URI and
    * line.
    */
-  public String getRawDocumentation(String name, URI uri, int line) {
+  public synchronized String getRawDocumentation(String name, URI uri, int line) {
     if (name == null || name.isBlank()) {
       return null;
     }
@@ -231,42 +232,42 @@ public class SymbolService {
   }
 
   /** Retrieves raw documentation for a symbol name resolved within the given context location. */
-  public String getRawDocumentation(String name, Location context) {
+  public synchronized String getRawDocumentation(String name, Location context) {
     if (context == null) {
       return getRawDocumentation(name);
     }
     return getRawDocumentation(name, context.filename(), context.line());
   }
 
-  public boolean hasDocumentation(String name) {
+  public synchronized boolean hasDocumentation(String name) {
     return getDocumentation(name) != null;
   }
 
   /** Checks if documentation exists for a symbol in the given file URI and line context. */
-  public boolean hasDocumentation(String name, URI uri, int line) {
+  public synchronized boolean hasDocumentation(String name, URI uri, int line) {
     return getDocumentation(name, uri, line) != null;
   }
 
   /** Checks if documentation exists for a symbol in the given context location. */
-  public boolean hasDocumentation(String name, Location context) {
+  public synchronized boolean hasDocumentation(String name, Location context) {
     return getDocumentation(name, context) != null;
   }
 
-  public Scope getGlobalScope() {
+  public synchronized Scope getGlobalScope() {
     return globalScope;
   }
 
-  public Scope getFileScope(URI uri) {
+  public synchronized Scope getFileScope(URI uri) {
     return uri != null ? fileScopes.get(uri) : null;
   }
 
   /** Finds the innermost scope matching the given URI and line number. */
-  public Optional<Scope> getScopeAt(URI uri, int line) {
+  public synchronized Optional<Scope> getScopeAt(URI uri, int line) {
     return Optional.ofNullable(findScopeAt(uri, line));
   }
 
   /** Finds the innermost scope matching the given context location. */
-  public Optional<Scope> getScopeAt(Location context) {
+  public synchronized Optional<Scope> getScopeAt(Location context) {
     if (context == null) {
       return Optional.empty();
     }
@@ -274,7 +275,7 @@ public class SymbolService {
   }
 
   /** Returns all scopes defined within a given file. */
-  public List<Scope> getScopes(URI uri) {
+  public synchronized List<Scope> getScopes(URI uri) {
     Scope fileScope = getFileScope(uri);
     if (fileScope == null) {
       return List.of();
@@ -285,14 +286,14 @@ public class SymbolService {
   }
 
   /** Returns all scopes in the project. */
-  public List<Scope> getAllScopes() {
+  public synchronized List<Scope> getAllScopes() {
     List<Scope> all = new ArrayList<>();
     collectScopes(globalScope, all);
     return List.copyOf(all);
   }
 
   /** Removes all definitions and scopes associated with a specific file URI. */
-  public void removeFile(URI uri) {
+  public synchronized void removeFile(URI uri) {
     if (uri == null) {
       return;
     }
@@ -300,16 +301,47 @@ public class SymbolService {
     if (fileScope != null) {
       globalScope.removeChild(fileScope);
     }
-    definitions
-        .entrySet()
-        .removeIf(e -> e.getValue() != null && uri.equals(e.getValue().filename()));
-    for (var list : allDefinitionsByName.values()) {
-      list.removeIf(loc -> loc != null && uri.equals(loc.filename()));
+    Set<String> symbols = filesToSymbols.remove(uri);
+    if (symbols != null) {
+      for (String sym : symbols) {
+        List<Location> list = allDefinitionsByName.get(sym);
+        if (list != null) {
+          list.removeIf(loc -> loc != null && uri.equals(loc.filename()));
+          if (list.isEmpty()) {
+            allDefinitionsByName.remove(sym);
+            Location defLoc = definitions.get(sym);
+            if (defLoc != null && uri.equals(defLoc.filename())) {
+              definitions.remove(sym);
+            }
+            Location globalLoc = globalScope.getLocalDefinition(sym);
+            if (globalLoc != null && uri.equals(globalLoc.filename())) {
+              globalScope.removeDefinition(sym);
+            }
+          } else {
+            Location defLoc = definitions.get(sym);
+            if (defLoc != null && uri.equals(defLoc.filename())) {
+              definitions.put(sym, list.get(list.size() - 1));
+            }
+            Location globalLoc = globalScope.getLocalDefinition(sym);
+            if (globalLoc != null && uri.equals(globalLoc.filename())) {
+              globalScope.addDefinition(sym, list.get(list.size() - 1));
+            }
+          }
+        } else {
+          Location defLoc = definitions.get(sym);
+          if (defLoc != null && uri.equals(defLoc.filename())) {
+            definitions.remove(sym);
+          }
+          Location globalLoc = globalScope.getLocalDefinition(sym);
+          if (globalLoc != null && uri.equals(globalLoc.filename())) {
+            globalScope.removeDefinition(sym);
+          }
+        }
+      }
     }
-    allDefinitionsByName.entrySet().removeIf(e -> e.getValue().isEmpty());
   }
 
-  public void extractDefinitions(TokenizedFile file) {
+  public synchronized void extractDefinitions(TokenizedFile file) {
     if (file == null) {
       return;
     }
@@ -626,6 +658,9 @@ public class SymbolService {
   private void recordDefinition(String name, Location location) {
     definitions.put(name, location);
     allDefinitionsByName.computeIfAbsent(name, k -> new ArrayList<>()).add(location);
+    if (location != null && location.filename() != null) {
+      filesToSymbols.computeIfAbsent(location.filename(), k -> new HashSet<>()).add(name);
+    }
   }
 
   private boolean isRegister(Token token) {
