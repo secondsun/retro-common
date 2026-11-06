@@ -345,4 +345,107 @@ public class InstructionSyntaxValidatorTest {
     diags = validator.validate(new CA65Scanner().tokenize("sm r1, (ADDR)\n"));
     assertEquals(1, diags.size(), diags.toString());
   }
+
+  @Test
+  public void testImmediateOutOfRangeShortOpcode() {
+    var code =
+        """
+        add #24
+        add #20
+        sub #16
+        and #$10
+        umult #32
+        """;
+    var diags = validator.validate(scanner.tokenize(code));
+    assertEquals(5, diags.size(), "Expected 5 IMMEDIATE_OUT_OF_RANGE diagnostics, found: " + diags);
+    assertTrue(diags.stream().allMatch(d -> "IMMEDIATE_OUT_OF_RANGE".equals(d.code())));
+    assertTrue(diags.get(0).message().contains("#24") && diags.get(0).message().contains("add"));
+    assertTrue(diags.get(1).message().contains("#20") && diags.get(1).message().contains("add"));
+    assertTrue(diags.get(2).message().contains("#16") && diags.get(2).message().contains("sub"));
+    assertTrue(diags.get(3).message().contains("#$10") && diags.get(3).message().contains("and"));
+    assertTrue(diags.get(4).message().contains("#32") && diags.get(4).message().contains("umult"));
+  }
+
+  @Test
+  public void testImmediateInRangeShortOpcode() {
+    var code =
+        """
+        add #0
+        add #15
+        sub #$0F
+        and #7
+        """;
+    var diags = validator.validate(scanner.tokenize(code));
+    assertTrue(
+        diags.isEmpty(), "Expected zero diagnostics for in-range immediates, found: " + diags);
+  }
+
+  @Test
+  public void testSymbolicImmediateAllowed() {
+    var code =
+        """
+        add #SOME_CONST
+        sub #SOME_CONST + 1
+        and #(1 + 2)
+        """;
+    var diags = validator.validate(scanner.tokenize(code));
+    assertTrue(
+        diags.isEmpty(),
+        "Expected zero diagnostics for symbolic/expression immediates, found: " + diags);
+  }
+
+  @Test
+  public void testLinkImmediateRange() {
+    var failCode =
+        """
+        link #5
+        link #0
+        """;
+    var diags = validator.validate(scanner.tokenize(failCode));
+    assertEquals(
+        2, diags.size(), "Expected 2 IMMEDIATE_OUT_OF_RANGE diagnostics for link, found: " + diags);
+    assertEquals("IMMEDIATE_OUT_OF_RANGE", diags.get(0).code());
+    assertEquals(
+        "Immediate operand '#5' for 'link' is out of range (#1 to #4).", diags.get(0).message());
+    assertEquals("IMMEDIATE_OUT_OF_RANGE", diags.get(1).code());
+    assertEquals(
+        "Immediate operand '#0' for 'link' is out of range (#1 to #4).", diags.get(1).message());
+
+    var passCode =
+        """
+        link #1
+        link #4
+        link #SOME_LINK_CONST
+        """;
+    var passDiags = validator.validate(scanner.tokenize(passCode));
+    assertTrue(
+        passDiags.isEmpty(), "Expected zero diagnostics for valid link #1-#4, found: " + passDiags);
+  }
+
+  @Test
+  public void testImmediateHexBinaryAndNegativeLiterals() {
+    var failCode =
+        """
+        add #-1
+        sub #-5
+        add #0x10
+        add #%10000
+        """;
+    var diags = validator.validate(scanner.tokenize(failCode));
+    assertEquals(
+        4,
+        diags.size(),
+        "Expected 4 diagnostics for negative/hex/binary out-of-range, found: " + diags);
+    assertTrue(diags.stream().allMatch(d -> "IMMEDIATE_OUT_OF_RANGE".equals(d.code())));
+
+    var passCode =
+        """
+        add #0x0F
+        add #%1111
+        """;
+    var passDiags = validator.validate(scanner.tokenize(passCode));
+    assertTrue(
+        passDiags.isEmpty(),
+        "Expected zero diagnostics for in-range 0x and %, found: " + passDiags);
+  }
 }

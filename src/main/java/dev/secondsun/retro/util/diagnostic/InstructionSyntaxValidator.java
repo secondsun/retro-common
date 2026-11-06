@@ -30,6 +30,11 @@ public class InstructionSyntaxValidator {
   private static final Set<String> R1_TO_R15_ONLY_INSTRUCTIONS =
       Set.of("and", "bic", "or", "xor", "mult", "umult");
 
+  private static final Set<String> IMM_0_TO_15_INSTRUCTIONS =
+      Set.of("add", "adc", "sub", "sbc", "and", "bic", "or", "xor", "mult", "umult");
+
+  private static final String LINK_INSTRUCTION = "link";
+
   private static class Scope {
     final Scope parent;
     final Set<String> registerLabels = new HashSet<>();
@@ -421,6 +426,46 @@ public class InstructionSyntaxValidator {
       }
     }
 
+    // Check immediate operand bounds for short-immediate GSU instructions and link
+    if (startIdx + 1 < tokens.size() && tokens.get(startIdx + 1).type == TokenType.TOK_HASH) {
+      if (IMM_0_TO_15_INSTRUCTIONS.contains(mnemonic) || LINK_INSTRUCTION.equals(mnemonic)) {
+        ParsedImmediate parsedImm = tryParseImmediateLiteral(tokens, startIdx, lineTokens);
+        if (parsedImm != null) {
+          int immStart = tokens.get(startIdx + 1).getStartIndex();
+          int immEnd = tokens.get(tokens.size() - 1).getEndIndex();
+          if (IMM_0_TO_15_INSTRUCTIONS.contains(mnemonic)) {
+            if (parsedImm.value < 0 || parsedImm.value > 15) {
+              diagnostics.add(
+                  SyntaxDiagnostic.error(
+                      uri,
+                      lineNum,
+                      immStart,
+                      immEnd,
+                      "IMMEDIATE_OUT_OF_RANGE",
+                      String.format(
+                          "Immediate operand '#%s' for '%s' is out of 4-bit range (#0 to #15 / #$0 to #$F). Load larger constants into a register via 'ibt' or 'iwt' first.",
+                          parsedImm.rawText, opcodeToken.text())));
+              return;
+            }
+          } else if (LINK_INSTRUCTION.equals(mnemonic)) {
+            if (parsedImm.value < 1 || parsedImm.value > 4) {
+              diagnostics.add(
+                  SyntaxDiagnostic.error(
+                      uri,
+                      lineNum,
+                      immStart,
+                      immEnd,
+                      "IMMEDIATE_OUT_OF_RANGE",
+                      String.format(
+                          "Immediate operand '#%s' for 'link' is out of range (#1 to #4).",
+                          parsedImm.rawText)));
+              return;
+            }
+          }
+        }
+      }
+    }
+
     // Sub-tokens starting from the opcode
     List<Token> subTokensList = tokens.subList(startIdx, tokens.size());
     Tokens subTokens = new Tokens(lineTokens.line(), subTokensList);
@@ -618,5 +663,100 @@ public class InstructionSyntaxValidator {
                 "Unexpected token after endfunction: " + t.text()));
       }
     }
+  }
+
+  private record ParsedImmediate(int value, String rawText) {}
+
+  private ParsedImmediate tryParseImmediateLiteral(
+      List<Token> tokens, int startIdx, Tokens lineTokens) {
+    int afterHashIdx = startIdx + 2;
+    if (afterHashIdx >= tokens.size()) {
+      return null;
+    }
+
+    // Case 1: Simple single token after '#' (tokens.size() == startIdx + 3)
+    if (tokens.size() == startIdx + 3) {
+      Token litToken = tokens.get(afterHashIdx);
+      if (litToken.type == TokenType.TOK_INTCON) {
+        int val = litToken.intVal;
+        String raw = getRawText(lineTokens, litToken.getStartIndex(), litToken.getEndIndex());
+        if (raw.isEmpty()) {
+          raw = !litToken.text().isEmpty() ? litToken.text() : Integer.toString(val);
+        }
+        return new ParsedImmediate(val, raw);
+      }
+      return null;
+    }
+
+    // Case 2: Negative literal '#-n' (tokens.size() == startIdx + 4)
+    if (tokens.size() == startIdx + 4
+        && tokens.get(afterHashIdx).type == TokenType.TOK_MINUS
+        && tokens.get(afterHashIdx + 1).type == TokenType.TOK_INTCON) {
+      Token litToken = tokens.get(afterHashIdx + 1);
+      int val = -litToken.intVal;
+      int start = tokens.get(afterHashIdx).getStartIndex();
+      int end = litToken.getEndIndex();
+      String raw = getRawText(lineTokens, start, end);
+      if (raw.isEmpty()) {
+        raw =
+            "-"
+                + (!litToken.text().isEmpty()
+                    ? litToken.text()
+                    : Integer.toString(litToken.intVal));
+      }
+      return new ParsedImmediate(val, raw);
+    }
+
+    // Case 3: Hex literal with 0x prefix (tokenized as TOK_INTCON:0 followed by TOK_IDENT:xNN)
+    if (tokens.size() == startIdx + 4
+        && tokens.get(afterHashIdx).type == TokenType.TOK_INTCON
+        && "0".equals(tokens.get(afterHashIdx).text())
+        && tokens.get(afterHashIdx + 1).type == TokenType.TOK_IDENT
+        && tokens.get(afterHashIdx).getEndIndex() == tokens.get(afterHashIdx + 1).getStartIndex()) {
+      int start = tokens.get(afterHashIdx).getStartIndex();
+      int end = tokens.get(afterHashIdx + 1).getEndIndex();
+      String raw = getRawText(lineTokens, start, end);
+      if (raw.matches("(?i)^0x[0-9a-fA-F]+$")) {
+        try {
+          long parsed = Long.parseLong(raw.substring(2), 16);
+          if (parsed <= Integer.MAX_VALUE && parsed >= Integer.MIN_VALUE) {
+            return new ParsedImmediate((int) parsed, raw);
+          }
+        } catch (NumberFormatException ignored) {
+        }
+      }
+    }
+
+    // Case 4: Negative 0x hex literal '#-0xNN' (tokens.size() == startIdx + 5)
+    if (tokens.size() == startIdx + 5
+        && tokens.get(afterHashIdx).type == TokenType.TOK_MINUS
+        && tokens.get(afterHashIdx + 1).type == TokenType.TOK_INTCON
+        && "0".equals(tokens.get(afterHashIdx + 1).text())
+        && tokens.get(afterHashIdx + 2).type == TokenType.TOK_IDENT
+        && tokens.get(afterHashIdx + 1).getEndIndex()
+            == tokens.get(afterHashIdx + 2).getStartIndex()) {
+      int start = tokens.get(afterHashIdx).getStartIndex();
+      int end = tokens.get(afterHashIdx + 2).getEndIndex();
+      String raw = getRawText(lineTokens, start, end);
+      if (raw.matches("(?i)^-0x[0-9a-fA-F]+$")) {
+        try {
+          long parsed = Long.parseLong(raw.substring(3), 16);
+          return new ParsedImmediate((int) -parsed, raw);
+        } catch (NumberFormatException ignored) {
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private String getRawText(Tokens lineTokens, int startIndex, int endIndex) {
+    if (lineTokens != null && lineTokens.line() != null) {
+      String line = lineTokens.line();
+      if (startIndex >= 0 && endIndex <= line.length() && startIndex <= endIndex) {
+        return line.substring(startIndex, endIndex).trim();
+      }
+    }
+    return "";
   }
 }
