@@ -617,8 +617,8 @@ endfunction
         """;
 
     var scanner = new CA65Scanner();
-    var file = scanner.tokenize(program);
-    file.uri = java.net.URI.create("file:///test/gsu_vector.i");
+    var uri = java.net.URI.create("file:///test/gsu_vector.i");
+    var file = scanner.tokenize(program, uri);
 
     // Verify no token-level errors from scanner
     for (int i = 0; i < file.textLines(); i++) {
@@ -662,21 +662,20 @@ endfunction
       }
     }
 
-    // Verify symbol extraction passes
-    var symbolService = new dev.secondsun.retro.util.SymbolService();
-    symbolService.extractDefinitions(file);
+    // Verify symbol extraction passes via WorkspaceSnapshot
+    var snapshot = dev.secondsun.retro.util.WorkspaceSnapshot.EMPTY.overlay(uri, program);
 
-    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("condensed_lmult"));
-    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_copy"));
-    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_cross"));
-    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_dot"));
-    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_add"));
-    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_negate"));
-    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_subtract"));
-    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_normalize"));
-    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("_normalize_big"));
-    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("_normalize_small"));
-    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_length"));
-    org.junit.jupiter.api.Assertions.assertNotNull(symbolService.getLocation("vector3_transform"));
+    org.junit.jupiter.api.Assertions.assertNotNull(snapshot.resolveLocation("condensed_lmult"));
+    org.junit.jupiter.api.Assertions.assertNotNull(snapshot.resolveLocation("vector3_copy"));
+    org.junit.jupiter.api.Assertions.assertNotNull(snapshot.resolveLocation("vector3_cross"));
+    org.junit.jupiter.api.Assertions.assertNotNull(snapshot.resolveLocation("vector3_dot"));
+    org.junit.jupiter.api.Assertions.assertNotNull(snapshot.resolveLocation("vector3_add"));
+    org.junit.jupiter.api.Assertions.assertNotNull(snapshot.resolveLocation("vector3_negate"));
+    org.junit.jupiter.api.Assertions.assertNotNull(snapshot.resolveLocation("vector3_subtract"));
+    org.junit.jupiter.api.Assertions.assertNotNull(snapshot.resolveLocation("vector3_normalize"));
+    org.junit.jupiter.api.Assertions.assertNotNull(snapshot.resolveLocation("_normalize_big"));
+    org.junit.jupiter.api.Assertions.assertNotNull(snapshot.resolveLocation("_normalize_small"));
+    org.junit.jupiter.api.Assertions.assertNotNull(snapshot.resolveLocation("vector3_length"));
+    org.junit.jupiter.api.Assertions.assertNotNull(snapshot.resolveLocation("vector3_transform"));
   }
 }

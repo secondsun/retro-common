@@ -1,17 +1,24 @@
 package dev.secondsun.retro.util.diagnostic;
 
+import dev.secondsun.retro.util.FunctionSyntaxHelper;
 import dev.secondsun.retro.util.Token;
 import dev.secondsun.retro.util.TokenType;
 import dev.secondsun.retro.util.vo.TokenizedFile;
 import dev.secondsun.retro.util.vo.Tokens;
 import java.net.URI;
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.List;
+import java.util.Locale;
 
 /**
  * Validates pairing, nesting, and termination of lexical block constructs across unassembled source
- * files. Supports both high-level X-GSU DSL blocks (function/endfunction, for/endfor) and ca65
- * directives (.if/.endif, .proc/.endproc, .scope/.endscope, .struct/.endstruct, .union/.endunion,
- * .enum/.endenum, .macro/.endmacro, .repeat/.endrep).
+ * files. Supports both high-level X-GSU DSL blocks ({@code [inline] function}/{@code endfunction},
+ * {@code for}/{@code endfor}) and ca65 directives ({@code .if}/{@code .endif}, {@code .proc}/{@code
+ * .endproc}, {@code .scope}/{@code .endscope}, {@code .struct}/{@code .endstruct}, {@code
+ * .union}/{@code .endunion}, {@code .enum}/{@code .endenum}, {@code .macro}/{@code .endmacro},
+ * {@code .repeat}/{@code .endrep}).
  */
 public class BlockStructureValidator {
 
@@ -64,19 +71,12 @@ public class BlockStructureValidator {
 
       int lineNum = lineIdx + 1; // 1-based
       List<Token> tokens = lineTokens.tokens();
-      Token first = tokens.get(0);
-
-      // Handle labels preceding directives/keywords (e.g. "my_proc: .proc" or "label: function")
-      int keywordIdx = 0;
-      if (tokens.size() > 1
-          && (tokens.get(1).type == TokenType.TOK_COLON || first.text().endsWith(":"))) {
-        keywordIdx = (tokens.get(1).type == TokenType.TOK_COLON) ? 2 : 1;
-        if (keywordIdx >= tokens.size()) {
-          continue;
-        }
-        first = tokens.get(keywordIdx);
+      int keywordIdx = findStatementStart(tokens);
+      if (keywordIdx >= tokens.size()) {
+        continue;
       }
 
+      Token first = tokens.get(keywordIdx);
       String firstText = first.text().toLowerCase(Locale.ROOT);
       TokenType type = first.type;
 
@@ -158,6 +158,19 @@ public class BlockStructureValidator {
     return diagnostics;
   }
 
+  private static int findStatementStart(List<Token> tokens) {
+    if (tokens.get(0).type == TokenType.TOK_COLON) {
+      return 1;
+    }
+    if (tokens.size() > 1 && tokens.get(1).type == TokenType.TOK_COLON) {
+      return 2;
+    }
+    if (tokens.get(0).text().endsWith(":")) {
+      return 1;
+    }
+    return 0;
+  }
+
   private BlockKind identifyCloser(
       Token token, String text, TokenType type, List<Token> tokens, int keywordIdx) {
     if (type == TokenType.TOK_ENDFUNCTION || "endfunction".equals(text)) {
@@ -177,6 +190,12 @@ public class BlockStructureValidator {
     }
     if (type == TokenType.TOK_ENDSTRUCT || ".endstruct".equals(text)) {
       return BlockKind.STRUCT;
+    }
+    if (type == TokenType.TOK_UNION || ".endunion".equals(text)) {
+      if (type == TokenType.TOK_UNION) {
+        return null;
+      }
+      return BlockKind.UNION;
     }
     if (type == TokenType.TOK_ENDUNION || ".endunion".equals(text)) {
       return BlockKind.UNION;
@@ -202,70 +221,60 @@ public class BlockStructureValidator {
 
   private OpenBlock identifyOpener(
       Token token, String text, TokenType type, List<Token> tokens, int keywordIdx, int lineNum) {
-    // High-level function
-    if (type == TokenType.TOK_FUNCTION || "function".equals(text)) {
-      String name = (keywordIdx + 1 < tokens.size()) ? tokens.get(keywordIdx + 1).text() : "";
+    List<Token> tail = tokens.subList(keywordIdx, tokens.size());
+    if (FunctionSyntaxHelper.isFunction(tail)) {
+      var decl = FunctionSyntaxHelper.parseFunction(tail);
+      Token endTok = decl.functionToken() != null ? decl.functionToken() : token;
       return new OpenBlock(
-          BlockKind.FUNCTION, name, lineNum, token.getStartIndex(), token.getEndIndex());
+          BlockKind.FUNCTION, decl.name(), lineNum, token.getStartIndex(), endTok.getEndIndex());
     }
 
-    // Hardware / macro loop: for or forR
     if ("for".equals(text) || "forr".equals(text)) {
       String param = (keywordIdx + 1 < tokens.size()) ? tokens.get(keywordIdx + 1).text() : "";
       return new OpenBlock(
           BlockKind.FOR, param, lineNum, token.getStartIndex(), token.getEndIndex());
     }
 
-    // Conditional directives (.if, .ifblank, .ifnblank, .ifdef, .ifndef, .ifconst, .ifnconst,
-    // .ifref, .ifnref,
-    // .ifp02, etc.)
     if (isIfOpener(token, text, type)) {
       return new OpenBlock(BlockKind.IF, "", lineNum, token.getStartIndex(), token.getEndIndex());
     }
 
-    // Procedure
     if (type == TokenType.TOK_PROC || ".proc".equals(text)) {
       String name = (keywordIdx + 1 < tokens.size()) ? tokens.get(keywordIdx + 1).text() : "";
       return new OpenBlock(
           BlockKind.PROC, name, lineNum, token.getStartIndex(), token.getEndIndex());
     }
 
-    // Lexical scope
     if (type == TokenType.TOK_SCOPE || ".scope".equals(text)) {
       String name = (keywordIdx + 1 < tokens.size()) ? tokens.get(keywordIdx + 1).text() : "";
       return new OpenBlock(
           BlockKind.SCOPE, name, lineNum, token.getStartIndex(), token.getEndIndex());
     }
 
-    // Struct
     if (type == TokenType.TOK_STRUCT || ".struct".equals(text)) {
       String name = (keywordIdx + 1 < tokens.size()) ? tokens.get(keywordIdx + 1).text() : "";
       return new OpenBlock(
           BlockKind.STRUCT, name, lineNum, token.getStartIndex(), token.getEndIndex());
     }
 
-    // Union
     if (type == TokenType.TOK_UNION || ".union".equals(text)) {
       String name = (keywordIdx + 1 < tokens.size()) ? tokens.get(keywordIdx + 1).text() : "";
       return new OpenBlock(
           BlockKind.UNION, name, lineNum, token.getStartIndex(), token.getEndIndex());
     }
 
-    // Enum
     if (type == TokenType.TOK_ENUM || ".enum".equals(text)) {
       String name = (keywordIdx + 1 < tokens.size()) ? tokens.get(keywordIdx + 1).text() : "";
       return new OpenBlock(
           BlockKind.ENUM, name, lineNum, token.getStartIndex(), token.getEndIndex());
     }
 
-    // Macro definition
     if (type == TokenType.TOK_MACRO || ".macro".equals(text) || ".mac".equals(text)) {
       String name = (keywordIdx + 1 < tokens.size()) ? tokens.get(keywordIdx + 1).text() : "";
       return new OpenBlock(
           BlockKind.MACRO, name, lineNum, token.getStartIndex(), token.getEndIndex());
     }
 
-    // Repeat loop
     if (type == TokenType.TOK_REPEAT || ".repeat".equals(text)) {
       String count = (keywordIdx + 1 < tokens.size()) ? tokens.get(keywordIdx + 1).text() : "";
       return new OpenBlock(

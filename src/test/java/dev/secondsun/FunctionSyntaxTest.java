@@ -246,8 +246,28 @@ public class FunctionSyntaxTest {
 
     assertTrue(FunctionSyntaxHelper.isEndFunction(tokens));
     assertFalse(FunctionSyntaxHelper.validateEndFunction(tokens));
-    assertTrue(tokens.tokens().get(1).hasAttribute(TokenAttribute.ERROR));
-    assertEquals("Unexpected token after endfunction: extra_arg", tokens.tokens().get(1).message);
+    var errors = FunctionSyntaxHelper.parseEndFunction(tokens);
+    assertEquals(1, errors.size());
+    assertTrue(errors.get(0).hasAttribute(TokenAttribute.ERROR));
+    assertEquals("Unexpected token after endfunction: extra_arg", errors.get(0).message);
+    assertFalse(
+        tokens.tokens().get(1).hasAttribute(TokenAttribute.ERROR),
+        "Input token must remain immutable");
+  }
+
+  @Test
+  public void testInlineFunctionDeclaration() {
+    var file = scanner.tokenize("inline function clamp16 val, lo, hi : out");
+    var tokens = file.getLine(0);
+
+    assertTrue(FunctionSyntaxHelper.isFunction(tokens));
+    assertTrue(FunctionSyntaxHelper.isInlineFunction(tokens));
+    var func = FunctionSyntaxHelper.parseFunction(tokens);
+    assertFalse(func.hasErrors());
+    assertTrue(func.isInline());
+    assertEquals("clamp16", func.name());
+    assertEquals(3, func.parameters().size());
+    assertEquals("out", func.returnVariable().orElseThrow().text());
   }
 
   @Test

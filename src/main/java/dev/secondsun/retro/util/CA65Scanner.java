@@ -1,805 +1,781 @@
 package dev.secondsun.retro.util;
 
+import dev.secondsun.retro.util.sfx.SuperFxIsa;
 import dev.secondsun.retro.util.vo.DotKeywords;
 import dev.secondsun.retro.util.vo.TokenizedFile;
+import dev.secondsun.retro.util.vo.Tokens;
+import java.net.URI;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
- * Scanner for unassembled ca65 assembly code. This scanner does *NOT* expand macros and works with
- * my X_GSU library.
+ * Thread-safe lexical scanner for unassembled ca65 and X-GSU assembly source code.
  *
- * <p>Based on scanner.c from ca65 source code.
- * https://github.com/cc65/cc65/blob/master/src/ca65/scanner.c
+ * <p>Populates {@link Token#text()} faithfully for every token type (including hex {@code $NN} /
+ * {@code 0xNN}, binary {@code %NN}, char literals {@code 'c'}, and multi-character operators) and
+ * produces immutable {@link Token} and {@link TokenizedFile} values.
  */
 public class CA65Scanner {
 
   private static final char LOCAL_START = '@';
-  private boolean isForcedEnd = false;
-  private char c = '\0';
-  private int line = 0;
-  private int column = 0;
-  private List<String> lines = null;
-  private boolean newLine = false;
-
-  public List<Token> tokenizeLine(String line) {
-    var token = nextToken();
-
-    var list = new java.util.ArrayList<Token>();
-    while (token.type != TokenType.TOK_EOF && token.type != TokenType.TOK_SEP && !newLine) {
-      list.add(token);
-      token = nextToken();
-    }
-
-    if (token.type != TokenType.TOK_EOF && token.type != TokenType.TOK_SEP) {
-      list.add(token);
-    }
-
-    newLine = false;
-    column = -1;
-    c = nextChar();
-    return list;
-  }
 
   public TokenizedFile tokenize(String ca65programText) {
-    var toReturn = new TokenizedFile();
+    return tokenize(ca65programText, null);
+  }
+
+  public TokenizedFile tokenize(String ca65programText, URI uri) {
+    if (ca65programText == null) {
+      return uri == null ? TokenizedFile.EMPTY : TokenizedFile.emptyWithUri(uri);
+    }
     var rawLines = Arrays.stream(ca65programText.split("\\r?\\n", -1)).toList();
-    toReturn.setRawLines(rawLines);
-
     var strippedText = Util.removeComments(ca65programText);
-    this.lines = Arrays.stream(strippedText.split("\\n")).map(it -> it + "\n").toList();
-    this.line = 0;
-    this.column = 0;
-    this.isForcedEnd = false;
-    this.newLine = false;
-    while (line < lines.size() && lines.get(line).isBlank()) {
-      line++;
-    }
-    if (line < lines.size()) {
-      c = lines.get(line).charAt(column);
-    } else {
-      c = '\0';
-    }
-    for (var line : lines) {
+    var lines = Arrays.stream(strippedText.split("\\n")).map(it -> it + "\n").toList();
 
-      if (!line.isBlank()) {
-        var lineNumber = this.line;
-        var tokens = tokenizeLine(line);
-        tokens.forEach(it -> it.lineNumber = lineNumber);
-        toReturn.addLine(line, lineNumber, tokens);
+    ScanSession session = new ScanSession(lines);
+    Map<Integer, Tokens> fileLines = new LinkedHashMap<>();
+    int maxLineIndex = rawLines.isEmpty() ? 0 : rawLines.size() - 1;
+
+    for (String currentLine : lines) {
+      if (!currentLine.isBlank()) {
+        int lineNumber = session.line;
+        List<Token> tokens = session.tokenizeLine(lineNumber);
+        fileLines.put(lineNumber, new Tokens(currentLine, tokens));
+        if (lineNumber > maxLineIndex) {
+          maxLineIndex = lineNumber;
+        }
       }
     }
 
-    return toReturn;
+    return TokenizedFile.create(uri, rawLines, fileLines, maxLineIndex);
   }
 
-  private Token nextToken() {
-    return nextRawToken();
+  /** Tokenizes a single line of assembly text in isolation. */
+  public List<Token> tokenizeLine(String singleLine) {
+    if (singleLine == null || singleLine.isBlank()) {
+      return List.of();
+    }
+    var stripped = Util.removeComments(singleLine);
+    if (stripped.isBlank()) {
+      return List.of();
+    }
+    ScanSession session = new ScanSession(List.of(stripped + "\n"));
+    return session.tokenizeLine(0);
   }
 
-  private Token nextRawToken() {
+  private static final class ScanSession {
+    private final List<String> lines;
+    private boolean isForcedEnd = false;
+    private char c = '\0';
+    private int line = 0;
+    private int column = 0;
+    private boolean newLine = false;
 
-    if (isForcedEnd) {
-      Token toReturn = new Token();
-      toReturn.startIndex = Math.max(0, column);
-      toReturn.type = TokenType.TOK_EOF;
-      toReturn.endIndex = 0;
-      return toReturn;
-    }
-
-    /* Skip whitespace */
-    if (isBlank(c)) {
-
-      do {
-        c = nextChar();
-      } while (isBlank(c) && !isForcedEnd && !newLine);
-    }
-
-    Token toReturn = new Token();
-    toReturn.startIndex = Math.max(0, column);
-
-    if (isForcedEnd) { // reached EOF above
-      toReturn.type = TokenType.TOK_EOF;
-      toReturn.endIndex = 0;
-      return toReturn;
-    }
-
-    /* Hex number or PC symbol? */
-    if (c == '$') {
-      c = nextChar();
-
-      /* Hex digit must follow or DollarIsPC must be enabled */
-      if (!isXDigit(c)) {
-        toReturn.type = TokenType.TOK_ERROR;
-        toReturn.message = "Hex digit expected";
-        toReturn.endIndex = column;
-        return toReturn;
+    ScanSession(List<String> lines) {
+      this.lines = lines;
+      while (line < lines.size() && lines.get(line).isBlank()) {
+        line++;
       }
-
-      /* Read the number */
-      toReturn.intVal = 0;
-      while (true) {
-        if (isXDigit(c)) {
-          if ((toReturn.intVal & 0xF0000000) != 0) {
-            toReturn.type = TokenType.TOK_ERROR;
-            toReturn.message = ("Overflow in hexadecimal number");
-            toReturn.intVal = 0;
-            return toReturn;
-          }
-          toReturn.intVal = (toReturn.intVal << 4) + digitVal(c);
-          c = nextChar();
-        } else {
-          break;
-        }
-      }
-
-      /* This is an integer constant */
-      toReturn.type = TokenType.TOK_INTCON;
-      toReturn.endIndex = column;
-      return toReturn;
-    }
-
-    /* Binary number? */
-    if (c == '%') {
-      c = nextChar();
-
-      /* 0 or 1 must follow */
-      if (!isBDigit(c)) {
-        return error("Binary digit expected", toReturn);
-      }
-
-      /* Read the number */
-      toReturn.intVal = 0;
-      while (true) {
-        if (isBDigit(c)) {
-          if ((toReturn.intVal & 0x80000000) != 0) {
-            toReturn.intVal = 0;
-            return error("Overflow in binary number", toReturn);
-          }
-          toReturn.intVal = (toReturn.intVal << 1) + digitVal(c);
-          c = nextChar();
-        } else {
-          break;
-        }
-      }
-
-      /* This is an integer constant */
-      toReturn.type = TokenType.TOK_INTCON;
-      toReturn.endIndex = column;
-      return toReturn;
-    }
-
-    /* Number? */
-    if (isDigit(c)) {
-
-      char[] buf = new char[16];
-      int Digits;
-      int Base;
-      int I;
-      long Max;
-      int DVal;
-
-      /* Ignore leading zeros */
-      while (c == '0') {
-        toReturn.appendChar(c);
-        c = nextChar();
-      }
-
-      /* Read the number into Buf counting the digits */
-      Digits = 0;
-      while (true) {
-        if (isXDigit(c)) {
-          /*
-           * Buf is big enough to allow any decimal and hex number to
-           ** overflow, so ignore excess digits here, they will be detected
-           ** when we convert the value.
-           */
-          if (Digits < buf.length) {
-            buf[Digits++] = c;
-          }
-          toReturn.appendChar(c);
-          c = nextChar();
-        } else {
-          break;
-        }
-      }
-
-      /* Allow zilog/intel style hex numbers with a 'h' suffix */
-      if (c == 'h' || c == 'H') {
-        toReturn.appendChar(c);
-        c = nextChar();
-        Base = 16;
-        Max = 0x7FFFFFFF / 16;
+      if (line < lines.size()) {
+        c = lines.get(line).charAt(column);
       } else {
-        Base = 10;
-        Max = 0x7FFFFFFF / 10;
+        c = '\0';
       }
-
-      /* Convert the number using the given base */
-      toReturn.intVal = 0;
-      for (I = 0; I < Digits; ++I) {
-        if (toReturn.intVal > Max) {
-          return error("Number out of range", toReturn);
-        }
-        DVal = digitVal(buf[I]);
-        if (DVal >= Base) {
-          return error("Invalid digits in number", toReturn);
-        }
-        toReturn.intVal = (toReturn.intVal * Base) + DVal;
-      }
-
-      /* This is an integer constant */
-      toReturn.type = TokenType.TOK_INTCON;
-      toReturn.endIndex = column;
-      return toReturn;
     }
 
-    /* Control command? */
-    if (c == '.') {
-
-      /* Remember and skip the dot */
+    List<Token> tokenizeLine(int lineNumber) {
+      var list = new ArrayList<Token>();
+      var token = nextRawToken(lineNumber);
+      while (token.type != TokenType.TOK_EOF && token.type != TokenType.TOK_SEP && !newLine) {
+        list.add(token);
+        token = nextRawToken(lineNumber);
+      }
+      if (token.type != TokenType.TOK_EOF && token.type != TokenType.TOK_SEP) {
+        list.add(token);
+      }
+      newLine = false;
+      column = -1;
       c = nextChar();
-
-      /* Check if it's just a dot */
-      if (!isIdStart(c)) {
-        /* Just a dot */
-        toReturn.appendChar('.');
-        toReturn.type = TokenType.TOK_DOT;
-      } else {
-
-        /* Read the remainder of the identifier */
-        toReturn.appendChar('.');
-        readIdent(toReturn);
-
-        /* Dot keyword, search for it */
-        toReturn.type = findDotKeyword(toReturn);
-      }
-      toReturn.endIndex = column;
-      return toReturn;
+      return List.copyOf(list);
     }
 
-    /* Local symbol? */
-    if (c == LOCAL_START) {
-
-      /* Read the identifier. */
-      readIdent(toReturn);
-
-      /* Start character alone is not enough */
-      if (toReturn.text().length() == 1) {
-        error("Invalid cheap local symbol", toReturn);
-        toReturn.endIndex = column;
-        return toReturn;
+    private Token finalizeToken(Token.Builder builder) {
+      String text = builder.text();
+      if (!text.isEmpty() && SuperFxIsa.isMnemonic(text)) {
+        builder.addAttribute(TokenAttribute.GSU_INSTRUCTION);
+        if ("nop".equalsIgnoreCase(text)) {
+          builder.addAttribute(TokenAttribute.NO_OPERATION);
+        }
       }
-
-      if (toReturn.text().equals("register")) {
-        toReturn.type = TokenType.TOK_REGISTER_KEYWORD;
-        toReturn.endIndex = column;
-        return toReturn;
-      }
-
-      /* A local identifier */
-      toReturn.type = TokenType.TOK_LOCAL_IDENT;
-      toReturn.endIndex = column;
-      return toReturn;
+      return builder.build();
     }
 
-    /* Identifier or keyword? */
-    if (isIdStart(c)) {
+    private Token nextRawToken(int lineNumber) {
+      Token.Builder b = new Token.Builder();
+      b.lineNumber = lineNumber;
 
-      /* Read the identifier */
-      readIdent(toReturn);
+      if (isForcedEnd) {
+        b.startIndex = Math.max(0, column);
+        b.type = TokenType.TOK_EOF;
+        b.endIndex = 0;
+        return b.build();
+      }
 
-      /*
-       * Check for special names. Bail out if we have identified the type of
-       ** the token. Go on if the token is an identifier.
-       */
-      switch (toReturn.text().length()) {
-        case 1:
-          switch (Character.toUpperCase(toReturn.text().charAt(0))) {
-            case 'A':
+      if (isBlank(c)) {
+        do {
+          c = nextChar();
+        } while (isBlank(c) && !isForcedEnd && !newLine);
+      }
+
+      b.startIndex = Math.max(0, column);
+
+      if (isForcedEnd) {
+        b.type = TokenType.TOK_EOF;
+        b.endIndex = 0;
+        return b.build();
+      }
+
+      /* Hex number ($NN)? */
+      if (c == '$') {
+        b.appendChar('$');
+        c = nextChar();
+
+        if (!isXDigit(c)) {
+          b.type = TokenType.TOK_ERROR;
+          b.message = "Hex digit expected";
+          b.endIndex = column;
+          return b.build();
+        }
+
+        b.intVal = 0;
+        while (isXDigit(c)) {
+          if ((b.intVal & 0xF0000000) != 0) {
+            b.type = TokenType.TOK_ERROR;
+            b.message = "Overflow in hexadecimal number";
+            b.intVal = 0;
+            b.endIndex = column;
+            return b.build();
+          }
+          b.appendChar(c);
+          b.intVal = (b.intVal << 4) + digitVal(c);
+          c = nextChar();
+        }
+
+        b.type = TokenType.TOK_INTCON;
+        b.endIndex = column;
+        return b.build();
+      }
+
+      /* Binary number (%NN)? */
+      if (c == '%') {
+        b.appendChar('%');
+        c = nextChar();
+
+        if (!isBDigit(c)) {
+          return error("Binary digit expected", b);
+        }
+
+        b.intVal = 0;
+        while (isBDigit(c)) {
+          if ((b.intVal & 0x80000000) != 0) {
+            b.intVal = 0;
+            return error("Overflow in binary number", b);
+          }
+          b.appendChar(c);
+          b.intVal = (b.intVal << 1) + digitVal(c);
+          c = nextChar();
+        }
+
+        b.type = TokenType.TOK_INTCON;
+        b.endIndex = column;
+        return b.build();
+      }
+
+      /* Number (decimal, 0x hex, or Zilog h-suffixed hex)? */
+      if (isDigit(c)) {
+        if (c == '0') {
+          b.appendChar(c);
+          c = nextChar();
+          if (c == 'x' || c == 'X') {
+            b.appendChar(c);
+            c = nextChar();
+            if (!isXDigit(c)) {
+              return error("Hex digit expected", b);
+            }
+            b.intVal = 0;
+            while (isXDigit(c)) {
+              if ((b.intVal & 0xF0000000) != 0) {
+                b.intVal = 0;
+                return error("Overflow in hexadecimal number", b);
+              }
+              b.appendChar(c);
+              b.intVal = (b.intVal << 4) + digitVal(c);
+              c = nextChar();
+            }
+            b.type = TokenType.TOK_INTCON;
+            b.endIndex = column;
+            return b.build();
+          }
+          while (c == '0') {
+            b.appendChar(c);
+            c = nextChar();
+          }
+        }
+
+        char[] buf = new char[16];
+        int digits = 0;
+        while (isXDigit(c)) {
+          if (digits < buf.length) {
+            buf[digits++] = c;
+          }
+          b.appendChar(c);
+          c = nextChar();
+        }
+
+        int base;
+        long max;
+        if (c == 'h' || c == 'H') {
+          b.appendChar(c);
+          c = nextChar();
+          base = 16;
+          max = 0x7FFFFFFF / 16;
+        } else {
+          base = 10;
+          max = 0x7FFFFFFF / 10;
+        }
+
+        b.intVal = 0;
+        for (int i = 0; i < digits; ++i) {
+          if (b.intVal > max) {
+            return error("Number out of range", b);
+          }
+          int dVal = digitVal(buf[i]);
+          if (dVal >= base) {
+            return error("Invalid digits in number", b);
+          }
+          b.intVal = (b.intVal * base) + dVal;
+        }
+
+        b.type = TokenType.TOK_INTCON;
+        b.endIndex = column;
+        return b.build();
+      }
+
+      /* Control command (.directive)? */
+      if (c == '.') {
+        c = nextChar();
+        if (!isIdStart(c)) {
+          b.appendChar('.');
+          b.type = TokenType.TOK_DOT;
+        } else {
+          b.appendChar('.');
+          readIdent(b);
+          b.type = findDotKeyword(b);
+        }
+        b.endIndex = column;
+        return b.build();
+      }
+
+      /* Cheap local symbol (@ident)? */
+      if (c == LOCAL_START) {
+        readIdent(b);
+        if (b.text().length() == 1) {
+          return error("Invalid cheap local symbol", b);
+        }
+        b.type = TokenType.TOK_LOCAL_IDENT;
+        b.endIndex = column;
+        return b.build();
+      }
+
+      /* Identifier, register, or keyword? */
+      if (isIdStart(c)) {
+        readIdent(b);
+        String text = b.text();
+
+        if (text.length() == 1) {
+          switch (Character.toUpperCase(text.charAt(0))) {
+            case 'A' -> {
               if (c == ':') {
+                b.appendChar(c);
                 c = nextChar();
-                toReturn.type = TokenType.TOK_OVERRIDE_ABS;
+                b.type = TokenType.TOK_OVERRIDE_ABS;
               } else {
-                toReturn.type = TokenType.TOK_A;
+                b.type = TokenType.TOK_A;
               }
-              toReturn.endIndex = column;
-              return toReturn;
-
-            case 'F':
+              b.endIndex = column;
+              return finalizeToken(b);
+            }
+            case 'F' -> {
               if (c == ':') {
+                b.appendChar(c);
                 c = nextChar();
-                toReturn.type = TokenType.TOK_OVERRIDE_FAR;
-                toReturn.endIndex = column;
-                return toReturn;
-              }
-              break;
-
-            case 'S':
-              toReturn.type = TokenType.TOK_S;
-              toReturn.endIndex = column;
-              return toReturn;
-            case 'X':
-              toReturn.type = TokenType.TOK_X;
-              toReturn.endIndex = column;
-              return toReturn;
-
-            case 'Y':
-              toReturn.type = TokenType.TOK_Y;
-              toReturn.endIndex = column;
-              return toReturn;
-
-            case 'Z':
-              if (c == ':') {
-                c = nextChar();
-                toReturn.type = TokenType.TOK_OVERRIDE_ZP;
-                toReturn.endIndex = column;
-                return toReturn;
-              }
-              break;
-
-            default:
-              break;
-          }
-        default:
-          break;
-      }
-
-      switch (Character.toUpperCase(toReturn.text().charAt(0))) {
-        case 'r':
-        case 'R':
-          if (toReturn.text().matches("[rR]\\d{1,2}")) {
-            toReturn.type = TokenType.TOK_REGISTER;
-            toReturn.endIndex = column;
-            return toReturn;
-          }
-          break;
-      }
-
-      if (toReturn.text().equalsIgnoreCase("function")) {
-        toReturn.type = TokenType.TOK_FUNCTION;
-        toReturn.endIndex = column;
-        return toReturn;
-      }
-      if (toReturn.text().equalsIgnoreCase("endfunction")) {
-        toReturn.type = TokenType.TOK_ENDFUNCTION;
-        toReturn.endIndex = column;
-        return toReturn;
-      }
-      if (toReturn.text().equalsIgnoreCase("call")) {
-        toReturn.type = TokenType.TOK_CALL;
-        toReturn.endIndex = column;
-        return toReturn;
-      }
-      if (toReturn.text().equalsIgnoreCase("return")) {
-        toReturn.type = TokenType.TOK_RETURN;
-        toReturn.endIndex = column;
-        return toReturn;
-      }
-      if (toReturn.text().equalsIgnoreCase("register")) {
-        toReturn.type = TokenType.TOK_REGISTER_KEYWORD;
-        toReturn.endIndex = column;
-        return toReturn;
-      }
-      /* Check for define style macro */
-      toReturn.type = TokenType.TOK_IDENT;
-      toReturn.endIndex = column;
-      return toReturn;
-    }
-
-    /* Ok, let's do the switch */
-    CharAgain:
-    switch (c) {
-      case '+':
-        toReturn.appendChar(c);
-        c = nextChar();
-        toReturn.type = TokenType.TOK_PLUS;
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '-':
-        toReturn.appendChar(c);
-        c = nextChar();
-        toReturn.type = TokenType.TOK_MINUS;
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '/':
-        toReturn.appendChar(c);
-        c = nextChar();
-        if (c != '*') {
-          toReturn.type = TokenType.TOK_DIV;
-        }
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '*':
-        toReturn.appendChar(c);
-        c = nextChar();
-        toReturn.type = TokenType.TOK_MUL;
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '^':
-        toReturn.appendChar(c);
-        c = nextChar();
-        toReturn.type = TokenType.TOK_XOR;
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '&':
-        toReturn.appendChar(c);
-        c = nextChar();
-        if (c == '&') {
-          toReturn.appendChar(c);
-          c = nextChar();
-          toReturn.type = TokenType.TOK_BOOLAND;
-        } else {
-          toReturn.type = TokenType.TOK_AND;
-        }
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '|':
-        toReturn.appendChar(c);
-        c = nextChar();
-        if (c == '|') {
-          c = nextChar();
-          toReturn.type = TokenType.TOK_BOOLOR;
-        } else {
-          toReturn.type = TokenType.TOK_OR;
-        }
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case ':':
-        toReturn.appendChar(c);
-        c = nextChar();
-        switch (c) {
-          case ':':
-            toReturn.appendChar(c);
-            c = nextChar();
-            toReturn.type = TokenType.TOK_NAMESPACE;
-            toReturn.endIndex = column;
-            break;
-
-          case '-':
-            toReturn.intVal = 0;
-            do {
-              --toReturn.intVal;
-              toReturn.endIndex = column;
-              toReturn.appendChar(c);
-              c = nextChar();
-            } while (c == '-');
-            toReturn.type = TokenType.TOK_ULABEL;
-            break;
-
-          case '+':
-            toReturn.intVal = 0;
-            do {
-              ++toReturn.intVal;
-              toReturn.endIndex = column;
-              toReturn.appendChar(c);
-              c = nextChar();
-            } while (c == '+');
-            toReturn.type = TokenType.TOK_ULABEL;
-            break;
-
-          case '=':
-            toReturn.appendChar(c);
-            c = nextChar();
-            toReturn.type = TokenType.TOK_ASSIGN;
-            break;
-
-          default:
-            toReturn.type = TokenType.TOK_COLON;
-            break;
-        }
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case ',':
-        toReturn.appendChar(c);
-        c = nextChar();
-        toReturn.type = TokenType.TOK_COMMA;
-        toReturn.endIndex = column;
-        return toReturn;
-      case '#':
-        toReturn.appendChar(c);
-        c = nextChar();
-        toReturn.type = TokenType.TOK_HASH;
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '(':
-        toReturn.appendChar(c);
-        c = nextChar();
-        toReturn.type = TokenType.TOK_LPAREN;
-        toReturn.endIndex = column;
-        return toReturn;
-      case ')':
-        toReturn.appendChar(c);
-        c = nextChar();
-        toReturn.type = TokenType.TOK_RPAREN;
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '[':
-        toReturn.appendChar(c);
-        c = nextChar();
-        toReturn.type = TokenType.TOK_LBRACK;
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case ']':
-        c = nextChar();
-        toReturn.type = TokenType.TOK_RBRACK;
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '{':
-        c = nextChar();
-        toReturn.type = TokenType.TOK_LCURLY;
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '}':
-        c = nextChar();
-        toReturn.type = TokenType.TOK_RCURLY;
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '<':
-        c = nextChar();
-        if (c == '=') {
-          c = nextChar();
-          toReturn.type = TokenType.TOK_LE;
-        } else if (c == '<') {
-          c = nextChar();
-          toReturn.type = TokenType.TOK_SHL;
-        } else if (c == '>') {
-          c = nextChar();
-          toReturn.type = TokenType.TOK_NE;
-        } else {
-          toReturn.type = TokenType.TOK_LT;
-        }
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '=':
-        c = nextChar();
-        toReturn.type = TokenType.TOK_EQ;
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '!':
-        c = nextChar();
-        toReturn.type = TokenType.TOK_BOOLNOT;
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '>':
-        c = nextChar();
-        if (c == '=') {
-          c = nextChar();
-          toReturn.type = TokenType.TOK_GE;
-        } else if (c == '>') {
-          c = nextChar();
-          toReturn.type = TokenType.TOK_SHR;
-        } else {
-          toReturn.type = TokenType.TOK_GT;
-        }
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '~':
-        c = nextChar();
-        toReturn.type = TokenType.TOK_NOT;
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '\'':
-        {
-          /* Always a character constant */
-          c = nextChar();
-          if (c == '\0' || isControl(c)) {
-            error("Illegal character constant", toReturn);
-            toReturn.endIndex = column;
-            return toReturn;
-          }
-          toReturn.intVal = c;
-          toReturn.type = TokenType.TOK_CHARCON;
-          c = nextChar();
-          if (c != '\'') {
-            error("Illegal character constant", toReturn);
-            toReturn.endIndex = column;
-            return toReturn;
-          } else {
-            c = nextChar();
-          }
-        }
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '\"':
-        readStringConst('\"', toReturn);
-        toReturn.type = TokenType.TOK_STRCON;
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '\\':
-        break;
-
-      case '\n':
-        // nextChar is handled in line setup
-        toReturn.type = TokenType.TOK_SEP;
-        toReturn.endIndex = column;
-        return toReturn;
-
-      case '\0':
-        toReturn.type = TokenType.TOK_EOF;
-        toReturn.endIndex = column;
-        return toReturn;
-    }
-
-    /*
-     * If we go here, we could not identify the current character. Skip it
-     ** and try again.
-     */
-    error(String.format("Invalid input character: 0x%02X", c & 0xFF), toReturn);
-    toReturn.endIndex = column;
-    c = nextChar();
-    return toReturn;
-  }
-
-  private void readStringConst(char stringTerm, Token toReturn) {
-    /* Skip the leading string terminator */
-    c = nextChar();
-
-    /* Read the string */
-    while (true) {
-      if (c == stringTerm) {
-        break;
-      }
-      if (c == '\n' || c == '\0') {
-        error("Newline in string constant", toReturn);
-        break;
-      }
-
-      if (c == '\\') {
-        c = nextChar();
-
-        switch (c) {
-          case '\0':
-            error("Unterminated escape sequence in string constant", toReturn);
-            break;
-          case '\\':
-          case '\'':
-          case '"':
-            break;
-          case 't':
-            break;
-          case 'r':
-            break;
-          case 'n':
-            break;
-          case 'x':
-            c = nextChar();
-            if (isXDigit(c)) {
-              // char high_nibble = digitVal (c) << 4;
-              c = nextChar();
-              if (isXDigit(c)) {
-                // c = high_nibble | digitVal (c);
-                break;
+                b.type = TokenType.TOK_OVERRIDE_FAR;
+                b.endIndex = column;
+                return finalizeToken(b);
               }
             }
-          /* FALLTHROUGH */
-          default:
-            error("Unsupported escape sequence in string constant", toReturn);
-            break;
+            case 'S' -> {
+              b.type = TokenType.TOK_S;
+              b.endIndex = column;
+              return finalizeToken(b);
+            }
+            case 'X' -> {
+              b.type = TokenType.TOK_X;
+              b.endIndex = column;
+              return finalizeToken(b);
+            }
+            case 'Y' -> {
+              b.type = TokenType.TOK_Y;
+              b.endIndex = column;
+              return finalizeToken(b);
+            }
+            case 'Z' -> {
+              if (c == ':') {
+                b.appendChar(c);
+                c = nextChar();
+                b.type = TokenType.TOK_OVERRIDE_ZP;
+                b.endIndex = column;
+                return finalizeToken(b);
+              }
+            }
+            default -> {}
+          }
         }
+
+        if ((text.charAt(0) == 'r' || text.charAt(0) == 'R') && text.matches("[rR]\\d{1,2}")) {
+          b.type = TokenType.TOK_REGISTER;
+          b.endIndex = column;
+          return finalizeToken(b);
+        }
+
+        if (text.equalsIgnoreCase("function")) {
+          b.type = TokenType.TOK_FUNCTION;
+          b.endIndex = column;
+          return finalizeToken(b);
+        }
+        if (text.equalsIgnoreCase("endfunction")) {
+          b.type = TokenType.TOK_ENDFUNCTION;
+          b.endIndex = column;
+          return finalizeToken(b);
+        }
+        if (text.equalsIgnoreCase("call")) {
+          b.type = TokenType.TOK_CALL;
+          b.endIndex = column;
+          return finalizeToken(b);
+        }
+        if (text.equalsIgnoreCase("return")) {
+          b.type = TokenType.TOK_RETURN;
+          b.endIndex = column;
+          return finalizeToken(b);
+        }
+        if (text.equalsIgnoreCase("register")) {
+          b.type = TokenType.TOK_REGISTER_KEYWORD;
+          b.endIndex = column;
+          return finalizeToken(b);
+        }
+
+        b.type = TokenType.TOK_IDENT;
+        b.endIndex = column;
+        return finalizeToken(b);
       }
 
-      /* Append the char to the string */
-      toReturn.appendChar(c);
+      switch (c) {
+        case '+' -> {
+          b.appendChar(c);
+          c = nextChar();
+          b.type = TokenType.TOK_PLUS;
+          b.endIndex = column;
+          return b.build();
+        }
+        case '-' -> {
+          b.appendChar(c);
+          c = nextChar();
+          b.type = TokenType.TOK_MINUS;
+          b.endIndex = column;
+          return b.build();
+        }
+        case '/' -> {
+          b.appendChar(c);
+          c = nextChar();
+          if (c != '*') {
+            b.type = TokenType.TOK_DIV;
+          }
+          b.endIndex = column;
+          return b.build();
+        }
+        case '*' -> {
+          b.appendChar(c);
+          c = nextChar();
+          b.type = TokenType.TOK_MUL;
+          b.endIndex = column;
+          return b.build();
+        }
+        case '^' -> {
+          b.appendChar(c);
+          c = nextChar();
+          b.type = TokenType.TOK_XOR;
+          b.endIndex = column;
+          return b.build();
+        }
+        case '&' -> {
+          b.appendChar(c);
+          c = nextChar();
+          if (c == '&') {
+            b.appendChar(c);
+            c = nextChar();
+            b.type = TokenType.TOK_BOOLAND;
+          } else {
+            b.type = TokenType.TOK_AND;
+          }
+          b.endIndex = column;
+          return b.build();
+        }
+        case '|' -> {
+          b.appendChar(c);
+          c = nextChar();
+          if (c == '|') {
+            b.appendChar(c);
+            c = nextChar();
+            b.type = TokenType.TOK_BOOLOR;
+          } else {
+            b.type = TokenType.TOK_OR;
+          }
+          b.endIndex = column;
+          return b.build();
+        }
+        case ':' -> {
+          b.appendChar(c);
+          c = nextChar();
+          switch (c) {
+            case ':' -> {
+              b.appendChar(c);
+              c = nextChar();
+              b.type = TokenType.TOK_NAMESPACE;
+            }
+            case '-' -> {
+              b.intVal = 0;
+              do {
+                --b.intVal;
+                b.appendChar(c);
+                c = nextChar();
+              } while (c == '-');
+              b.type = TokenType.TOK_ULABEL;
+            }
+            case '+' -> {
+              b.intVal = 0;
+              do {
+                ++b.intVal;
+                b.appendChar(c);
+                c = nextChar();
+              } while (c == '+');
+              b.type = TokenType.TOK_ULABEL;
+            }
+            case '=' -> {
+              b.appendChar(c);
+              c = nextChar();
+              b.type = TokenType.TOK_ASSIGN;
+            }
+            default -> b.type = TokenType.TOK_COLON;
+          }
+          b.endIndex = column;
+          return b.build();
+        }
+        case ',' -> {
+          b.appendChar(c);
+          c = nextChar();
+          b.type = TokenType.TOK_COMMA;
+          b.endIndex = column;
+          return b.build();
+        }
+        case '#' -> {
+          b.appendChar(c);
+          c = nextChar();
+          b.type = TokenType.TOK_HASH;
+          b.endIndex = column;
+          return b.build();
+        }
+        case '(' -> {
+          b.appendChar(c);
+          c = nextChar();
+          b.type = TokenType.TOK_LPAREN;
+          b.endIndex = column;
+          return b.build();
+        }
+        case ')' -> {
+          b.appendChar(c);
+          c = nextChar();
+          b.type = TokenType.TOK_RPAREN;
+          b.endIndex = column;
+          return b.build();
+        }
+        case '[' -> {
+          b.appendChar(c);
+          c = nextChar();
+          b.type = TokenType.TOK_LBRACK;
+          b.endIndex = column;
+          return b.build();
+        }
+        case ']' -> {
+          b.appendChar(c);
+          c = nextChar();
+          b.type = TokenType.TOK_RBRACK;
+          b.endIndex = column;
+          return b.build();
+        }
+        case '{' -> {
+          b.appendChar(c);
+          c = nextChar();
+          b.type = TokenType.TOK_LCURLY;
+          b.endIndex = column;
+          return b.build();
+        }
+        case '}' -> {
+          b.appendChar(c);
+          c = nextChar();
+          b.type = TokenType.TOK_RCURLY;
+          b.endIndex = column;
+          return b.build();
+        }
+        case '<' -> {
+          b.appendChar(c);
+          c = nextChar();
+          if (c == '=') {
+            b.appendChar(c);
+            c = nextChar();
+            b.type = TokenType.TOK_LE;
+          } else if (c == '<') {
+            b.appendChar(c);
+            c = nextChar();
+            b.type = TokenType.TOK_SHL;
+          } else if (c == '>') {
+            b.appendChar(c);
+            c = nextChar();
+            b.type = TokenType.TOK_NE;
+          } else {
+            b.type = TokenType.TOK_LT;
+          }
+          b.endIndex = column;
+          return b.build();
+        }
+        case '=' -> {
+          b.appendChar(c);
+          c = nextChar();
+          b.type = TokenType.TOK_EQ;
+          b.endIndex = column;
+          return b.build();
+        }
+        case '!' -> {
+          b.appendChar(c);
+          c = nextChar();
+          b.type = TokenType.TOK_BOOLNOT;
+          b.endIndex = column;
+          return b.build();
+        }
+        case '>' -> {
+          b.appendChar(c);
+          c = nextChar();
+          if (c == '=') {
+            b.appendChar(c);
+            c = nextChar();
+            b.type = TokenType.TOK_GE;
+          } else if (c == '>') {
+            b.appendChar(c);
+            c = nextChar();
+            b.type = TokenType.TOK_SHR;
+          } else {
+            b.type = TokenType.TOK_GT;
+          }
+          b.endIndex = column;
+          return b.build();
+        }
+        case '~' -> {
+          b.appendChar(c);
+          c = nextChar();
+          b.type = TokenType.TOK_NOT;
+          b.endIndex = column;
+          return b.build();
+        }
+        case '\'' -> {
+          b.appendChar('\'');
+          c = nextChar();
+          if (c == '\0' || isControl(c)) {
+            return error("Illegal character constant", b);
+          }
+          b.appendChar(c);
+          b.intVal = c;
+          b.type = TokenType.TOK_CHARCON;
+          c = nextChar();
+          if (c != '\'') {
+            return error("Illegal character constant", b);
+          }
+          b.appendChar('\'');
+          c = nextChar();
+          b.endIndex = column;
+          return b.build();
+        }
+        case '\"' -> {
+          readStringConst('\"', b);
+          if (b.type != TokenType.TOK_ERROR) {
+            b.type = TokenType.TOK_STRCON;
+          }
+          b.endIndex = column;
+          return b.build();
+        }
+        case '\\' -> {}
+        case '\n' -> {
+          b.type = TokenType.TOK_SEP;
+          b.endIndex = column;
+          return b.build();
+        }
+        case '\0' -> {
+          b.type = TokenType.TOK_EOF;
+          b.endIndex = column;
+          return b.build();
+        }
+        default -> {}
+      }
 
-      /* Skip the character */
+      b.appendChar(c);
+      Token err = error(String.format("Invalid input character: 0x%02X", c & 0xFF), b);
       c = nextChar();
+      return err;
     }
 
-    /* Skip the trailing terminator (only if the string was actually terminated;
-     * after a newline/EOF the column is stale and reading again would overrun the new line) */
-    if (c == stringTerm) {
+    private void readStringConst(char stringTerm, Token.Builder b) {
       c = nextChar();
+      while (true) {
+        if (c == stringTerm) {
+          break;
+        }
+        if (c == '\n' || c == '\0') {
+          b.message = "Newline in string constant";
+          b.intVal = 0;
+          b.type = TokenType.TOK_ERROR;
+          break;
+        }
+        if (c == '\\') {
+          c = nextChar();
+          switch (c) {
+            case '\0' -> {
+              b.message = "Unterminated escape sequence in string constant";
+              b.type = TokenType.TOK_ERROR;
+            }
+            case '\\', '\'', '"', 't', 'r', 'n' -> {}
+            case 'x' -> {
+              c = nextChar();
+              if (isXDigit(c)) {
+                c = nextChar();
+                if (isXDigit(c)) {
+                  break;
+                }
+              }
+              b.message = "Unsupported escape sequence in string constant";
+              b.type = TokenType.TOK_ERROR;
+            }
+            default -> {
+              b.message = "Unsupported escape sequence in string constant";
+              b.type = TokenType.TOK_ERROR;
+            }
+          }
+        }
+        b.appendChar(c);
+        c = nextChar();
+      }
+      if (c == stringTerm) {
+        c = nextChar();
+      }
+    }
+
+    private TokenType findDotKeyword(Token.Builder b) {
+      var directive = DotKeywords.fromText(b.text());
+      if (directive != null) {
+        return directive.type;
+      }
+      b.message = "Unknown Directive";
+      b.intVal = 0;
+      return TokenType.TOK_ERROR;
+    }
+
+    private void readIdent(Token.Builder b) {
+      do {
+        b.appendChar(c);
+        c = nextChar();
+        b.endIndex = column;
+      } while (isIdChar(c));
+    }
+
+    private Token error(String message, Token.Builder b) {
+      b.message = message;
+      b.endIndex = column;
+      b.intVal = 0;
+      b.type = TokenType.TOK_ERROR;
+      return b.build();
+    }
+
+    private char nextChar() {
+      if (line >= lines.size()) {
+        return '\0';
+      }
+      this.column++;
+      var currentLine = lines.get(line);
+      if (currentLine.length() > column) {
+        var toReturn = currentLine.charAt(column);
+        if (toReturn == '\n') {
+          newLine = true;
+          line++;
+          while (line < lines.size() && lines.get(line).isBlank()) {
+            line++;
+          }
+          if (line < lines.size()) {
+            return '\n';
+          } else {
+            isForcedEnd = true;
+            return '\0';
+          }
+        }
+        return toReturn;
+      } else {
+        throw new RuntimeException(
+            "Should not reach " + this.line + ", " + this.column + " was " + currentLine);
+      }
     }
   }
 
-  private boolean isControl(char c2) {
+  private static boolean isControl(char c2) {
     return Character.isISOControl(c2);
   }
 
-  private TokenType findDotKeyword(Token token) {
-    var directive = DotKeywords.fromText(token.text());
-    if (directive != null) {
-      return directive.type;
-    }
-    error("Unknown Directive", token);
-    return TokenType.TOK_ERROR;
-  }
-
-  private void readIdent(Token token) {
-    do {
-      token.appendChar(c);
-      c = nextChar();
-      token.endIndex = column;
-    } while (isIdChar(c));
-  }
-
-  private boolean isIdChar(char c2) {
+  private static boolean isIdChar(char c2) {
     return isAlNum(c2) || (c2 == '_') || (c2 == '@') || (c2 == '$');
   }
 
-  private boolean isAlNum(char c2) {
+  private static boolean isAlNum(char c2) {
     return Character.isAlphabetic(c2) || Character.isDigit(c2);
   }
 
-  private boolean isIdStart(char c2) {
+  private static boolean isIdStart(char c2) {
     return Character.isAlphabetic(c2) || c2 == '_';
   }
 
-  private boolean isDigit(char c2) {
+  private static boolean isDigit(char c2) {
     return Character.isDigit(c2);
   }
 
-  private Token error(String string, Token toReturn) {
-    toReturn.message = string;
-    toReturn.endIndex = column;
-    toReturn.intVal = 0;
-    toReturn.type = TokenType.TOK_ERROR;
-    return toReturn;
-  }
-
-  private boolean isBDigit(char c2) {
+  private static boolean isBDigit(char c2) {
     return c2 == '0' || c2 == '1';
   }
 
-  private int digitVal(char c2) {
+  private static int digitVal(char c2) {
     return Integer.parseInt(String.valueOf(c2), 16);
   }
 
-  private boolean isXDigit(char c2) {
+  private static boolean isXDigit(char c2) {
     return Character.isDigit(c2) || (c2 >= 'a' && c2 <= 'f') || (c2 >= 'A' && c2 <= 'F');
   }
 
-  private char nextChar() {
-    if (line >= lines.size()) {
-      return '\0';
-    }
-    this.column++;
-    var currentLine = lines.get(line);
-    if (currentLine.length() > column) {
-      var toReturn = currentLine.charAt(column);
-      if (toReturn == '\n') {
-        newLine = true;
-        line++;
-        while (line < lines.size() && lines.get(line).isBlank()) {
-          line++;
-        }
-        if (line < lines.size()) {
-          return '\n';
-        } else {
-          isForcedEnd = true;
-          return '\0';
-        }
-      }
-      return toReturn;
-    } else {
-      throw new RuntimeException(
-          "Should not reach " + this.line + ", " + this.column + " was " + currentLine);
-    }
-  }
-
-  private boolean isBlank(char c) {
-    return Character.isWhitespace(c);
+  private static boolean isBlank(char c2) {
+    return !Character.isWhitespace(c2) ? false : c2 != '\n';
   }
 }

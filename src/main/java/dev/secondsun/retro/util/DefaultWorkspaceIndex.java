@@ -1,70 +1,116 @@
 package dev.secondsun.retro.util;
 
-import dev.secondsun.retro.util.vo.Location;
-import dev.secondsun.retro.util.vo.Scope;
 import dev.secondsun.retro.util.vo.TokenizedFile;
 import java.io.File;
-import java.io.FileFilter;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Default implementation of {@link WorkspaceIndex} coordinating file loading, buffer precedence,
- * workspace sandbox confinement, on-demand directory inclusion, and scoped symbol resolution.
+ * Default thread-safe implementation of {@link WorkspaceIndex} publishing immutable {@link
+ * WorkspaceSnapshot}s (`effectiveFiles = diskFiles ⊕ openBuffers`) via an {@link AtomicReference}.
  */
 public class DefaultWorkspaceIndex implements WorkspaceIndex {
 
   private static final Logger LOG = Logger.getLogger(DefaultWorkspaceIndex.class.getName());
 
-  private static URI safeNormalize(URI uri) {
-    if (uri == null) {
-      return null;
-    }
-    if ("file".equalsIgnoreCase(uri.getScheme())) {
-      try {
-        return Util.normalize(uri);
-      } catch (Exception e) {
-        return uri.normalize();
-      }
-    }
-    return uri.normalize();
-  }
+  private static final Set<String> IGNORED_DIR_NAMES =
+      Set.of("node_modules", "target", "dist", "out", "build", "tools", "build_tools");
 
-  protected final FileService fileService;
-  protected final SymbolService symbolService;
-  protected final ReferenceService referenceService;
-  protected final Path workspaceRoot;
-  protected final Map<URI, TokenizedFile> files = new ConcurrentHashMap<>();
-  protected final Set<URI> inMemoryBuffers = ConcurrentHashMap.newKeySet();
-  protected final Set<URI> visitedDirs = ConcurrentHashMap.newKeySet();
-  protected final Set<Path> indexedDirectories = ConcurrentHashMap.newKeySet();
-  private Consumer<Path> directoryIndexedListener;
+  private final Object writeLock = new Object();
+  private final FileService fileService;
+  private final Path workspaceRoot;
+  private final Map<URI, TokenizedFile> diskFiles = new LinkedHashMap<>();
+  private final Map<URI, TokenizedFile> openBuffers = new LinkedHashMap<>();
+  private final Set<URI> visitedDirs = ConcurrentHashMap.newKeySet();
+  private final Set<Path> indexedDirectories = ConcurrentHashMap.newKeySet();
+  private final AtomicReference<WorkspaceSnapshot> currentSnapshot;
+  private volatile Consumer<Path> directoryIndexedListener;
 
   public DefaultWorkspaceIndex() {
-    this(new FileService(), new SymbolService(), null);
+    this(null);
   }
 
   public DefaultWorkspaceIndex(Path workspaceRoot) {
-    this(new FileService(), new SymbolService(), workspaceRoot);
-  }
-
-  public DefaultWorkspaceIndex(FileService fileService, SymbolService symbolService) {
-    this(fileService, symbolService, null);
-  }
-
-  public DefaultWorkspaceIndex(
-      FileService fileService, SymbolService symbolService, Path workspaceRoot) {
-    this.fileService = Objects.requireNonNull(fileService, "fileService must not be null");
-    this.symbolService = Objects.requireNonNull(symbolService, "symbolService must not be null");
+    this.fileService = new FileService();
     this.workspaceRoot = workspaceRoot != null ? workspaceRoot.toAbsolutePath().normalize() : null;
-    this.referenceService = new ReferenceService(this);
+    if (this.workspaceRoot != null && Files.isDirectory(this.workspaceRoot)) {
+      this.fileService.addSearchPath(this.workspaceRoot.toUri());
+    }
+    this.currentSnapshot =
+        new AtomicReference<>(
+            new WorkspaceSnapshot(
+                this.workspaceRoot, Map.of(), Map.of(), this.fileService.searchPathsSnapshot()));
+  }
+
+  private static URI safeNormalize(URI uri) {
+    return ReferenceService.normalizeUri(uri);
+  }
+
+  /**
+   * Returns true if {@code uri} is an in-memory synthetic snippet URI (`snippet:...` or normalized
+   * `/snippet[.ext]`) AFTER collapsing any `..` path traversal segments.
+   */
+  public static boolean isSyntheticSnippetUri(URI uri) {
+    if (uri == null) {
+      return false;
+    }
+    if ("snippet".equalsIgnoreCase(uri.getScheme())) {
+      return true;
+    }
+    if ("file".equalsIgnoreCase(uri.getScheme())) {
+      try {
+        String norm = Path.of(uri).toAbsolutePath().normalize().toString().replace('\\', '/');
+        return norm.equals("/snippet")
+            || norm.startsWith("/snippet.")
+            || norm.startsWith("/snippet/");
+      } catch (Exception e) {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  private void publishSnapshotLocked() {
+    currentSnapshot.set(
+        new WorkspaceSnapshot(
+            workspaceRoot, diskFiles, openBuffers, fileService.searchPathsSnapshot()));
+  }
+
+  @Override
+  public WorkspaceSnapshot snapshot() {
+    return currentSnapshot.get();
+  }
+
+  @Override
+  public WorkspaceSnapshot snapshotFor(URI nullableUri, String inlineCode) {
+    if (inlineCode != null && !inlineCode.isBlank()) {
+      if (nullableUri != null) {
+        validateUriWithinWorkspace(nullableUri);
+        if (!isSyntheticSnippetUri(nullableUri)) {
+          ensureParentIndexedQuietly(nullableUri);
+        }
+        return snapshot().overlay(nullableUri, inlineCode);
+      }
+      return snapshot().overlay(null, inlineCode);
+    }
+    if (nullableUri != null) {
+      resolveFile(nullableUri, null);
+    }
+    return snapshot();
   }
 
   @Override
@@ -73,55 +119,36 @@ public class DefaultWorkspaceIndex implements WorkspaceIndex {
       if (uri != null) {
         validateUriWithinWorkspace(uri);
         URI normUri = safeNormalize(uri);
-        updateFileContents(normUri, optionalCode);
-        inMemoryBuffers.add(normUri);
-        return getFileContents(normUri);
-      } else {
-        CA65Scanner scanner = new CA65Scanner();
-        TokenizedFile snippet = scanner.tokenize(optionalCode);
-        snippet.uri = URI.create("snippet:///inline.s");
-        return snippet;
-      }
-    } else if (uri != null) {
-      validateUriWithinWorkspace(uri);
-      URI normUri = safeNormalize(uri);
-      TokenizedFile existing = files.get(normUri);
-      if (existing != null && existing != TokenizedFile.EMPTY) {
-        return existing;
-      }
-
-      // On-demand indexing of parent directory if not yet loaded
-      try {
-        Path path = Path.of(normUri).toAbsolutePath().normalize();
-        if (Files.exists(path)) {
-          Path parent = Files.isDirectory(path) ? path : path.getParent();
-          if (parent != null
-              && parent.getParent() != null
-              && !indexedDirectories.contains(parent)) {
-            includeDir(parent.toUri());
-          }
+        if (isSyntheticSnippetUri(normUri)) {
+          return new CA65Scanner().tokenize(optionalCode, normUri);
         }
-      } catch (Exception e) {
-        LOG.log(Level.FINE, "Failed on-demand parent directory indexing for " + normUri, e);
+        ensureParentIndexedQuietly(normUri);
+        openOrUpdateBuffer(normUri, optionalCode);
+        return snapshot().file(normUri);
       }
-
-      existing = files.get(normUri);
-      if (existing != null && existing != TokenizedFile.EMPTY) {
-        return existing;
-      }
-
-      try {
-        TokenizedFile loaded = fileService.readLines(normUri);
-        if (loaded != null && loaded != TokenizedFile.EMPTY) {
-          files.put(normUri, loaded);
-          symbolService.extractDefinitions(loaded);
-          return loaded;
-        }
-      } catch (IOException e) {
-        LOG.log(Level.FINE, "Failed to read file from disk for " + normUri, e);
-      }
-      return TokenizedFile.EMPTY;
+      return new CA65Scanner().tokenize(optionalCode, WorkspaceSnapshot.TRANSIENT_SNIPPET_URI);
     }
+
+    if (uri != null) {
+      validateUriWithinWorkspace(uri);
+      if (isSyntheticSnippetUri(uri)) {
+        return TokenizedFile.EMPTY;
+      }
+      URI normUri = safeNormalize(uri);
+      TokenizedFile existing = snapshot().file(normUri);
+      if (!existing.isEmpty()) {
+        return existing;
+      }
+
+      ensureParentIndexedQuietly(normUri);
+      existing = snapshot().file(normUri);
+      if (!existing.isEmpty()) {
+        return existing;
+      }
+
+      return loadDiskFileIfAbsent(normUri);
+    }
+
     return TokenizedFile.EMPTY;
   }
 
@@ -130,90 +157,174 @@ public class DefaultWorkspaceIndex implements WorkspaceIndex {
     if (uri == null) {
       return TokenizedFile.EMPTY;
     }
-    URI normUri = safeNormalize(uri);
-    TokenizedFile file = files.get(normUri);
-    if (file != null && file != TokenizedFile.EMPTY) {
-      return file;
+    validateUriWithinWorkspace(uri);
+    if (isSyntheticSnippetUri(uri)) {
+      return TokenizedFile.EMPTY;
     }
+    URI normUri = safeNormalize(uri);
+    TokenizedFile existing = snapshot().file(normUri);
+    if (!existing.isEmpty()) {
+      return existing;
+    }
+    return loadDiskFileIfAbsent(normUri);
+  }
 
-    // Try fallback to FileService
+  private TokenizedFile loadDiskFileIfAbsent(URI normUri) {
     try {
       TokenizedFile loaded = fileService.readLines(normUri);
-      if (loaded != null && loaded != TokenizedFile.EMPTY) {
-        files.put(normUri, loaded);
-        symbolService.extractDefinitions(loaded);
-        return loaded;
+      if (loaded != null && !loaded.isEmpty()) {
+        URI key = loaded.uri() != null ? safeNormalize(loaded.uri()) : normUri;
+        validateUriWithinWorkspace(key);
+        synchronized (writeLock) {
+          diskFiles.put(key, loaded);
+          publishSnapshotLocked();
+        }
+        return snapshot().file(key);
       }
     } catch (IOException e) {
       LOG.log(Level.FINE, "Could not load file from disk for " + normUri, e);
     }
-
     return TokenizedFile.EMPTY;
   }
 
+  private void ensureParentIndexedQuietly(URI normUri) {
+    if (!"file".equalsIgnoreCase(normUri.getScheme())) {
+      return;
+    }
+    try {
+      Path path = Path.of(normUri).toAbsolutePath().normalize();
+      if (Files.exists(path)) {
+        Path parent = Files.isDirectory(path) ? path : path.getParent();
+        if (parent != null
+            && parent.getParent() != null
+            && isInsideWorkspace(parent.toUri())
+            && !indexedDirectories.contains(parent)) {
+          includeDir(parent.toUri());
+        }
+      }
+    } catch (Exception e) {
+      LOG.log(Level.FINE, "Failed on-demand parent directory indexing for " + normUri, e);
+    }
+  }
+
   @Override
-  public synchronized void updateFileContents(URI uri, String text) {
+  public void ensureIndexed(URI uri) {
+    if (uri != null) {
+      validateUriWithinWorkspace(uri);
+      if (isSyntheticSnippetUri(uri)) {
+        return;
+      }
+      if ("file".equalsIgnoreCase(uri.getScheme())) {
+        try {
+          Path path = Path.of(uri).toAbsolutePath().normalize();
+          Path dir = Files.isDirectory(path) ? path : path.getParent();
+          if (dir != null
+              && Files.isDirectory(dir)
+              && isInsideWorkspace(dir.toUri())
+              && !indexedDirectories.contains(dir)) {
+            includeDir(dir.toUri());
+          }
+        } catch (Exception e) {
+          LOG.log(Level.FINE, "Failed ensureIndexed for " + uri, e);
+        }
+      }
+    } else if (workspaceRoot != null && Files.isDirectory(workspaceRoot)) {
+      includeDir(workspaceRoot.toUri());
+    }
+  }
+
+  @Override
+  public void openOrUpdateBuffer(URI uri, String text) {
     if (uri == null || text == null) {
       return;
     }
+    validateUriWithinWorkspace(uri);
+    if (isSyntheticSnippetUri(uri)) {
+      return;
+    }
     URI normUri = safeNormalize(uri);
-    try {
-      TokenizedFile tokenized = new CA65Scanner().tokenize(text);
-      tokenized.uri = normUri;
-      files.put(normUri, tokenized);
-      symbolService.extractDefinitions(tokenized);
-    } catch (Exception e) {
-      LOG.log(Level.WARNING, "Failed to tokenize and update file contents for " + normUri, e);
+    TokenizedFile tokenized = new CA65Scanner().tokenize(text, normUri);
+    synchronized (writeLock) {
+      openBuffers.put(normUri, tokenized);
+      publishSnapshotLocked();
     }
   }
 
   @Override
-  public synchronized void closeBuffer(URI uri) {
+  public void closeBuffer(URI uri) {
     if (uri == null) {
       return;
     }
     URI normUri = safeNormalize(uri);
-    inMemoryBuffers.remove(normUri);
+    TokenizedFile reloadedDisk = null;
+    boolean diskExists = false;
+    if (!isSyntheticSnippetUri(normUri) && isInsideWorkspace(normUri)) {
+      try {
+        TokenizedFile onDisk = fileService.readLines(normUri);
+        if (onDisk != null && !onDisk.isEmpty()) {
+          reloadedDisk = onDisk;
+          diskExists = true;
+        }
+      } catch (IOException ignored) {
+      }
+    }
+
+    synchronized (writeLock) {
+      openBuffers.remove(normUri);
+      if (diskExists) {
+        diskFiles.put(normUri, reloadedDisk);
+      } else {
+        diskFiles.remove(normUri);
+      }
+      publishSnapshotLocked();
+    }
+  }
+
+  @Override
+  public void notifyDiskEvent(URI uri, DiskEventKind kind) {
+    if (uri == null || kind == null) {
+      return;
+    }
+    if (!isInsideWorkspace(uri) || isSyntheticSnippetUri(uri)) {
+      return;
+    }
+    URI normUri = safeNormalize(uri);
+    if (kind == DiskEventKind.DELETED) {
+      synchronized (writeLock) {
+        if (diskFiles.remove(normUri) != null) {
+          publishSnapshotLocked();
+        }
+      }
+      return;
+    }
+
+    // CREATED or MODIFIED: update diskFiles ONLY — never overwrite active openBuffers!
     try {
       TokenizedFile onDisk = fileService.readLines(normUri);
-      if (onDisk != null && onDisk != TokenizedFile.EMPTY) {
-        files.put(normUri, onDisk);
-        symbolService.extractDefinitions(onDisk);
-      } else {
-        files.remove(normUri);
-        symbolService.removeFile(normUri);
+      synchronized (writeLock) {
+        if (onDisk != null && !onDisk.isEmpty()) {
+          diskFiles.put(normUri, onDisk);
+        } else {
+          diskFiles.remove(normUri);
+        }
+        publishSnapshotLocked();
       }
     } catch (IOException e) {
-      files.remove(normUri);
-      symbolService.removeFile(normUri);
+      LOG.log(Level.FINE, "Could not reload modified file from disk: " + normUri, e);
     }
   }
 
   @Override
-  public synchronized void removeFile(URI uri) {
+  public void removeFile(URI uri) {
     if (uri == null) {
       return;
     }
     URI normUri = safeNormalize(uri);
-    files.remove(normUri);
-    inMemoryBuffers.remove(normUri);
-    symbolService.removeFile(normUri);
-  }
-
-  @Override
-  public synchronized void refreshFileContents(URI uri) {
-    if (uri == null) {
-      return;
-    }
-    URI normUri = safeNormalize(uri);
-    try {
-      TokenizedFile tokenized = fileService.readLines(normUri);
-      if (tokenized != null && tokenized != TokenizedFile.EMPTY) {
-        files.put(normUri, tokenized);
-        symbolService.extractDefinitions(tokenized);
+    synchronized (writeLock) {
+      boolean changed = (diskFiles.remove(normUri) != null) | (openBuffers.remove(normUri) != null);
+      if (changed) {
+        publishSnapshotLocked();
       }
-    } catch (IOException e) {
-      LOG.log(Level.SEVERE, e.getMessage(), e);
     }
   }
 
@@ -224,18 +335,25 @@ public class DefaultWorkspaceIndex implements WorkspaceIndex {
     }
     validateUriWithinWorkspace(directory);
     URI normDir = safeNormalize(directory);
-    this.fileService.addSearchPath(normDir);
-    _includeDir(normDir);
+    fileService.addSearchPath(normDir);
+
+    Map<URI, TokenizedFile> loadedBatch = new LinkedHashMap<>();
+    scanDirRecursive(normDir, loadedBatch);
+
+    synchronized (writeLock) {
+      diskFiles.putAll(loadedBatch);
+      publishSnapshotLocked();
+    }
   }
 
-  private void _includeDir(URI directory) {
+  private void scanDirRecursive(URI directory, Map<URI, TokenizedFile> loadedBatch) {
     if (!visitedDirs.add(directory)) {
       return;
     }
 
     Path workspacePath;
     try {
-      workspacePath = Path.of(directory);
+      workspacePath = Path.of(directory).toAbsolutePath().normalize();
     } catch (Exception e) {
       LOG.log(Level.FINE, "Failed to resolve path for directory: " + directory, e);
       return;
@@ -246,10 +364,12 @@ public class DefaultWorkspaceIndex implements WorkspaceIndex {
       return;
     }
 
+    fileService.addSearchPath(directory);
     indexedDirectories.add(workspacePath);
-    if (directoryIndexedListener != null) {
+    Consumer<Path> listener = directoryIndexedListener;
+    if (listener != null) {
       try {
-        directoryIndexedListener.accept(workspacePath);
+        listener.accept(workspacePath);
       } catch (Exception e) {
         LOG.log(Level.WARNING, "Error in directory indexed listener for " + workspacePath, e);
       }
@@ -257,41 +377,40 @@ public class DefaultWorkspaceIndex implements WorkspaceIndex {
 
     File[] matchingFiles =
         dirFile.listFiles(
-            new FileFilter() {
-              @Override
-              public boolean accept(File pathname) {
-                String name = pathname.getName().toLowerCase(Locale.ROOT);
-                return name.endsWith(".s")
-                    || name.endsWith(".sgs")
-                    || name.endsWith(".i")
-                    || name.endsWith(".inc");
+            pathname -> {
+              if (!pathname.isFile()) {
+                return false;
               }
+              String name = pathname.getName().toLowerCase(Locale.ROOT);
+              return name.endsWith(".s")
+                  || name.endsWith(".sgs")
+                  || name.endsWith(".i")
+                  || name.endsWith(".inc");
             });
 
     if (matchingFiles != null) {
       List<URI> includeDirsToScan = new ArrayList<>();
+      WorkspaceSnapshot snap = currentSnapshot.get();
       for (File file : matchingFiles) {
         URI fileUri = safeNormalize(file.toPath().toUri());
-        if (!files.containsKey(fileUri)) {
+        if (!snap.diskFiles().containsKey(fileUri) && !loadedBatch.containsKey(fileUri)) {
           try {
             TokenizedFile tokenized = fileService.readLines(fileUri);
-            if (tokenized != null && tokenized != TokenizedFile.EMPTY) {
-              files.put(fileUri, tokenized);
-              symbolService.extractDefinitions(tokenized);
-
-              tokenized.forEach(
-                  (line, tokens) -> {
-                    if (Util.isIncludeDirective(tokens.line().trim())
-                        && tokens.tokens().size() > 1) {
-                      String includeTarget = tokens.tokens().get(1).text().replace("\"", "").trim();
-                      for (URI foundUri : fileService.find(URI.create("./" + includeTarget))) {
-                        File f = new File(foundUri);
-                        if (f.exists() && f.getParentFile() != null) {
-                          includeDirsToScan.add(f.getParentFile().getAbsoluteFile().toURI());
-                        }
-                      }
-                    }
-                  });
+            if (tokenized != null && !tokenized.isEmpty()) {
+              loadedBatch.put(fileUri, tokenized);
+              for (String includeTarget : tokenized.scopeTree().includes()) {
+                Path relResolved = workspacePath.resolve(includeTarget).normalize();
+                if (Files.isRegularFile(relResolved) && relResolved.getParent() != null) {
+                  includeDirsToScan.add(safeNormalize(relResolved.getParent().toUri()));
+                }
+                for (URI foundUri : fileService.find(URI.create("./" + includeTarget))) {
+                  File f = new File(foundUri);
+                  if (f.exists() && f.getParentFile() != null) {
+                    includeDirsToScan.add(
+                        safeNormalize(f.getParentFile().getAbsoluteFile().toURI()));
+                  }
+                }
+              }
             }
           } catch (IOException e) {
             LOG.log(Level.WARNING, "Failed to read lines for " + fileUri, e);
@@ -299,8 +418,11 @@ public class DefaultWorkspaceIndex implements WorkspaceIndex {
         }
       }
 
+      // Skip external out-of-workspace include directories gracefully without aborting indexing
       for (URI incDir : includeDirsToScan) {
-        includeDir(incDir);
+        if (isInsideWorkspace(incDir)) {
+          scanDirRecursive(incDir, loadedBatch);
+        }
       }
     }
 
@@ -308,17 +430,10 @@ public class DefaultWorkspaceIndex implements WorkspaceIndex {
     if (subDirs != null) {
       Arrays.stream(subDirs)
           .filter(
-              dir ->
-                  !dir.getName().startsWith(".")
-                      && !dir.getName().equals("node_modules")
-                      && !dir.getName().equals("target")
-                      && !dir.getName().equals("dist")
-                      && !dir.getName().equals("out")
-                      && !dir.getName().equals("build")
-                      && !dir.getName().equals("tools")
-                      && !dir.getName().equals("build_tools"))
-          .map(File::toURI)
-          .forEach(this::_includeDir);
+              dir -> !dir.getName().startsWith(".") && !IGNORED_DIR_NAMES.contains(dir.getName()))
+          .map(f -> safeNormalize(f.toPath().toUri()))
+          .filter(this::isInsideWorkspace)
+          .forEach(sub -> scanDirRecursive(sub, loadedBatch));
     }
   }
 
@@ -327,23 +442,25 @@ public class DefaultWorkspaceIndex implements WorkspaceIndex {
     if (uri == null) {
       return;
     }
-    String uriStr = uri.toString();
-    if (uriStr.startsWith("snippet:")
-        || uriStr.startsWith("file:///snippet")
-        || !uri.isAbsolute()
-        || !"file".equalsIgnoreCase(uri.getScheme())) {
+    String scheme = uri.getScheme();
+    if ("snippet".equalsIgnoreCase(scheme)) {
       return;
     }
-    if (workspaceRoot != null) {
-      Path target = Path.of(uri).toAbsolutePath().normalize();
-      if (!target.startsWith(workspaceRoot)) {
-        throw new SecurityException(
-            "Access denied: URI '"
-                + uri
-                + "' is outside the configured workspace boundary: '"
-                + workspaceRoot
-                + "'");
-      }
+    if (!uri.isAbsolute() || !"file".equalsIgnoreCase(scheme)) {
+      return;
+    }
+    // Normalize '..' segments BEFORE checking synthetic '/snippet' or workspace boundary!
+    Path target = Path.of(uri).toAbsolutePath().normalize();
+    if (isSyntheticSnippetUri(uri)) {
+      return;
+    }
+    if (workspaceRoot != null && !target.startsWith(workspaceRoot)) {
+      throw new SecurityException(
+          "Access denied: URI '"
+              + uri
+              + "' is outside the configured workspace boundary: '"
+              + workspaceRoot
+              + "'");
     }
   }
 
@@ -360,111 +477,8 @@ public class DefaultWorkspaceIndex implements WorkspaceIndex {
     }
   }
 
-  @Override
-  public Location resolveLocation(String symbol, URI callingUri, Integer line) {
-    if (symbol == null || symbol.isBlank()) {
-      return null;
-    }
-    Location loc = null;
-    if (callingUri != null && line != null) {
-      loc = symbolService.getLocation(symbol, callingUri, line);
-    }
-    if (loc == null && callingUri != null) {
-      loc = symbolService.getLocation(symbol, callingUri, 1);
-    }
-    if (loc == null) {
-      loc = symbolService.getLocation(symbol);
-    }
-    return loc;
-  }
-
-  @Override
-  public List<Location> resolveLocations(String symbol, URI callingUri, Integer line) {
-    if (symbol == null || symbol.isBlank()) {
-      return List.of();
-    }
-    List<Location> locs = null;
-    if (callingUri != null && line != null) {
-      locs = symbolService.getLocations(symbol, callingUri, line);
-    }
-    if (locs == null || locs.isEmpty()) {
-      locs = symbolService.getLocations(symbol);
-    }
-    return locs != null ? locs : List.of();
-  }
-
-  @Override
-  public String resolveDocumentation(String symbol, URI callingUri, Integer line) {
-    if (symbol == null || symbol.isBlank()) {
-      return null;
-    }
-    String doc = null;
-    if (callingUri != null && line != null) {
-      doc = symbolService.getDocumentation(symbol, callingUri, line);
-    }
-    if (doc == null || doc.isBlank()) {
-      doc = symbolService.getDocumentation(symbol);
-    }
-    return doc;
-  }
-
-  @Override
-  public Optional<Scope> getScopeAt(URI uri, int line) {
-    if (uri == null) {
-      return Optional.empty();
-    }
-    return symbolService.getScopeAt(uri, line);
-  }
-
-  /**
-   * Returns a snapshot of the currently indexed files map.
-   *
-   * @return unmodifiable snapshot of URI to {@link TokenizedFile}
-   */
   public Map<URI, TokenizedFile> getIndexedFiles() {
-    return Collections.unmodifiableMap(new LinkedHashMap<>(files));
-  }
-
-  @Override
-  public List<dev.secondsun.retro.util.vo.SymbolReference> findDetailedReferences(
-      String symbol, URI callingUri, Integer line, boolean includeDefinitions) {
-    return referenceService.findDetailedReferences(symbol, callingUri, line, includeDefinitions);
-  }
-
-  @Override
-  public Optional<String> resolveSymbolAt(TokenizedFile file, int line, int column) {
-    return referenceService.resolveSymbolAt(file, line, column);
-  }
-
-  @Override
-  public List<dev.secondsun.retro.util.vo.SymbolReference> findDetailedReferencesAt(
-      TokenizedFile file, URI uri, int line, int column, boolean includeDefinitions) {
-    return referenceService.findDetailedReferencesAt(file, uri, line, column, includeDefinitions);
-  }
-
-  @Override
-  public List<Location> findReferencesAt(
-      TokenizedFile file, URI uri, int line, int column, boolean includeDefinitions) {
-    return referenceService.findReferencesAt(file, uri, line, column, includeDefinitions);
-  }
-
-  @Override
-  public ReferenceService.ReferenceResult findReferencesResult(
-      String symbol,
-      String code,
-      String uriStr,
-      Integer line,
-      String pathFilter,
-      Integer maxResults,
-      Boolean includeDefinitions,
-      Integer contextLines) {
-    return referenceService.find(
-        symbol, code, uriStr, line, pathFilter, maxResults, includeDefinitions, contextLines);
-  }
-
-  @Override
-  public ReferenceService getReferenceService() {
-    return referenceService;
+    return snapshot().effectiveFiles();
   }
 
   @Override
@@ -475,15 +489,5 @@ public class DefaultWorkspaceIndex implements WorkspaceIndex {
   @Override
   public Path getWorkspaceRoot() {
     return workspaceRoot;
-  }
-
-  @Override
-  public FileService getFileService() {
-    return fileService;
-  }
-
-  @Override
-  public SymbolService getSymbolService() {
-    return symbolService;
   }
 }

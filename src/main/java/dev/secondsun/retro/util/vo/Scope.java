@@ -1,14 +1,26 @@
 package dev.secondsun.retro.util.vo;
 
 import java.net.URI;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 /**
- * Represents a lexical scope (e.g. global, file, function, procedure, struct, or block scope).
- * Scopes form a hierarchy with parent and child relationships and provide context-aware symbol
- * resolution.
+ * Represents a lexical scope (global, file, function, procedure, struct, enum, macro, or block
+ * scope). Scopes form a hierarchy with parent and child relationships and provide context-aware
+ * symbol, documentation, and register-variable resolution.
  */
 public class Scope {
+
+  private static final List<String> LOW_PRIORITY_FRAGMENTS =
+      List.of("/src/test/resources/", "/.build/", "/.build_libsfx/", "/build_tools/");
 
   private final String name;
   private final ScopeType type;
@@ -16,25 +28,43 @@ public class Scope {
   private final int startLine;
   private int endLine;
   private final Scope parent;
+  private final boolean inlineFunction;
+  private final FunctionDeclaration functionDeclaration;
   private final List<Scope> children = new ArrayList<>();
   private final Map<String, Location> definitions = new LinkedHashMap<>();
   private final Map<String, String> documentations = new HashMap<>();
   private final Map<String, String> rawDocumentations = new HashMap<>();
+  private final Set<String> registerLabels = new LinkedHashSet<>();
+  private final Map<String, String> precoloredRegisters = new LinkedHashMap<>();
 
-  public Scope(String name, ScopeType type, URI uri, int startLine, int endLine, Scope parent) {
+  public Scope(
+      String name,
+      ScopeType type,
+      URI uri,
+      int startLine,
+      int endLine,
+      Scope parent,
+      boolean inlineFunction,
+      FunctionDeclaration functionDeclaration) {
     this.name = name != null ? name : "";
     this.type = type != null ? type : ScopeType.GLOBAL;
     this.uri = uri;
     this.startLine = startLine;
     this.endLine = endLine;
     this.parent = parent;
+    this.inlineFunction = inlineFunction;
+    this.functionDeclaration = functionDeclaration;
     if (parent != null) {
       parent.addChild(this);
     }
   }
 
+  public Scope(String name, ScopeType type, URI uri, int startLine, int endLine, Scope parent) {
+    this(name, type, uri, startLine, endLine, parent, false, null);
+  }
+
   public Scope(String name, ScopeType type, URI uri, int startLine, Scope parent) {
-    this(name, type, uri, startLine, Integer.MAX_VALUE, parent);
+    this(name, type, uri, startLine, Integer.MAX_VALUE, parent, false, null);
   }
 
   public String name() {
@@ -65,6 +95,14 @@ public class Scope {
     return parent;
   }
 
+  public boolean isInlineFunction() {
+    return inlineFunction;
+  }
+
+  public FunctionDeclaration functionDeclaration() {
+    return functionDeclaration;
+  }
+
   public List<Scope> children() {
     return Collections.unmodifiableList(children);
   }
@@ -91,18 +129,73 @@ public class Scope {
     return Collections.unmodifiableMap(rawDocumentations);
   }
 
+  public Set<String> registerLabels() {
+    return Collections.unmodifiableSet(registerLabels);
+  }
+
+  public Map<String, String> precoloredRegisters() {
+    return Collections.unmodifiableMap(precoloredRegisters);
+  }
+
+  public void addRegisterLabel(String varName) {
+    if (varName != null && !varName.isBlank()) {
+      registerLabels.add(varName.toLowerCase(Locale.ROOT));
+    }
+  }
+
+  public void addPrecoloredRegister(String varName, String physicalReg) {
+    if (varName != null && !varName.isBlank() && physicalReg != null && !physicalReg.isBlank()) {
+      precoloredRegisters.put(
+          varName.toLowerCase(Locale.ROOT), physicalReg.toLowerCase(Locale.ROOT));
+    }
+  }
+
+  public boolean isRegisterLabel(String varName) {
+    if (varName == null || varName.isBlank()) {
+      return false;
+    }
+    if (registerLabels.contains(varName.toLowerCase(Locale.ROOT))) {
+      return true;
+    }
+    return parent != null && parent.isRegisterLabel(varName);
+  }
+
+  public String resolvePrecoloredRegister(String varName) {
+    if (varName == null || varName.isBlank()) {
+      return null;
+    }
+    String reg = precoloredRegisters.get(varName.toLowerCase(Locale.ROOT));
+    if (reg != null) {
+      return reg;
+    }
+    return parent != null ? parent.resolvePrecoloredRegister(varName) : null;
+  }
+
   public void addDefinition(String name, Location location) {
     if (name != null && location != null) {
       if (this.type == ScopeType.GLOBAL) {
         Location existing = definitions.get(name);
         if (existing != null
-            && !dev.secondsun.retro.util.ReferenceService.isLowPriority(existing.filename())
-            && dev.secondsun.retro.util.ReferenceService.isLowPriority(location.filename())) {
+            && !isLowPriorityUri(existing.filename())
+            && isLowPriorityUri(location.filename())) {
           return;
         }
       }
       definitions.put(name, location);
     }
+  }
+
+  private static boolean isLowPriorityUri(URI uri) {
+    if (uri == null) {
+      return false;
+    }
+    String s = uri.toString();
+    for (String frag : LOW_PRIORITY_FRAGMENTS) {
+      if (s.contains(frag)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   public void removeDefinition(String name) {
@@ -196,7 +289,6 @@ public class Scope {
       return null;
     }
 
-    // Root resolution (e.g., ::global_sym)
     if (name.startsWith("::")) {
       Scope root = this;
       while (root.parent != null) {
@@ -205,7 +297,6 @@ public class Scope {
       return root.resolve(name.substring(2));
     }
 
-    // Qualified name resolution (e.g., scope::symbol)
     if (name.contains("::")) {
       int colonIdx = name.indexOf("::");
       String scopeName = name.substring(0, colonIdx);
@@ -225,13 +316,11 @@ public class Scope {
       return null;
     }
 
-    // Local definition check
     Location loc = definitions.get(name);
     if (loc != null) {
       return loc;
     }
 
-    // Search enclosing parent scope
     if (parent != null) {
       return parent.resolve(name);
     }

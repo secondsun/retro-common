@@ -56,14 +56,12 @@ Follow the Elephant and Goldfish separation of concerns:
   - `dev.secondsun.retro.util.CA65Scanner`: Lexes raw text into token streams (`TokenizedFile`, `Tokens`, `Token`).
   - `dev.secondsun.retro.util.FunctionSyntaxHelper`: Pure parser and validator for pseudo-macro statements (`function`, `endfunction`, `call`, `return`), yielding immutable VO records (`FunctionDeclaration`, `CallStatement`, `ReturnStatement`).
   - `dev.secondsun.retro.util.instruction.*`: Matches instruction mnemonics and operands via `ArgumentMatcher` and `Instructions`.
+  - `dev.secondsun.retro.util.sfx.*`: Shared SuperFX ISA catalog (`SuperFxIsa`, `ModalStepEvaluator`, `MacroEffectSummary`, `ScopeTree`) and dialect profiles (`DialectProfile`).
   - `dev.secondsun.retro.util.Util`: Pure helper routines for string stripping, comment extraction, and URI normalization.
   - *Invariant*: Keep these classes pure, thread-safe, and independent of disk/workspace state. No mocking needed for tests.
 - **Elephant (Stateful & Persistent)**:
-  - `dev.secondsun.retro.util.WorkspaceIndex` / `DefaultWorkspaceIndex`: Coordinates file loading, in-memory buffer precedence, workspace sandbox confinement, on-demand directory inclusion, and scoped symbol resolution.
-  - `dev.secondsun.retro.util.ReferenceService`: Workspace-wide reference engine classifying symbol usages (`call`, `read`, `write`, `macro-invocation`, `use`) and disambiguating scoped symbols.
-  - `dev.secondsun.retro.util.ProjectService`: Coordinates workspace discovery and file ingestion.
-  - `dev.secondsun.retro.util.FileService`: Handles search paths and file reading via `java.net.URI`.
-  - `dev.secondsun.retro.util.SymbolService`: Stores symbol locations, scopes, documentation, and definitions.
+  - `dev.secondsun.retro.util.WorkspaceIndex` / `WorkspaceSnapshot` / `DefaultWorkspaceIndex`: Sealed workspace seam coordinating file loading, immutable point-in-time query snapshots, transient overlays (`withOverlay`), sandbox confinement, lazy directory inclusion, and scoped symbol/macro resolution.
+  - Package-private internal engines (`FileService`, `SymbolService`, `ReferenceService`): Encapsulated behind `WorkspaceIndex` and `WorkspaceSnapshot` for search-path reading, symbol storage, and usage classification (`call`, `read`, `write`, `macro-invocation`, `use`).
   - *Invariant*: All file identities must use `java.net.URI` rather than platform-specific string paths.
 
 ## 4. Coding Standards & Invariants

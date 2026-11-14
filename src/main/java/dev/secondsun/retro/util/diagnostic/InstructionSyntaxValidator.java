@@ -2,81 +2,36 @@ package dev.secondsun.retro.util.diagnostic;
 
 import dev.secondsun.retro.util.FunctionSyntaxHelper;
 import dev.secondsun.retro.util.Token;
-import dev.secondsun.retro.util.TokenAttribute;
 import dev.secondsun.retro.util.TokenType;
-import dev.secondsun.retro.util.instruction.GSUInstruction;
 import dev.secondsun.retro.util.instruction.Instructions;
+import dev.secondsun.retro.util.sfx.SuperFxIsa;
+import dev.secondsun.retro.util.vo.DialectProfile;
+import dev.secondsun.retro.util.vo.ImmediateLiteral;
+import dev.secondsun.retro.util.vo.Scope;
+import dev.secondsun.retro.util.vo.ScopeTree;
 import dev.secondsun.retro.util.vo.TokenizedFile;
 import dev.secondsun.retro.util.vo.Tokens;
 import java.net.URI;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
+import java.util.OptionalInt;
 
 /**
- * Validates opcode arity, operand patterns, macro calling conventions, and lexical token errors.
+ * Pure, non-mutating validator for SuperFX opcode arity, operand patterns, immediate and register
+ * bounds, X-GSU high-level macro calling conventions ({@code [inline] function}, {@code call},
+ * {@code return}, {@code endfunction}, {@code register}), anonymous label targets, and lexical
+ * token errors.
+ *
+ * <p>SuperFX instruction checks are gated on {@link DialectProfile#SUPERFX} from {@link ScopeTree}
+ * so 65816 host assembly files (`.s`) using shared mnemonics (`and #$FF00`, `sbc #$01`, `cmp #$80`,
+ * `inc`, `lsr a`, `jmp Label`) never produce false-positive coprocessor errors.
  */
 public class InstructionSyntaxValidator {
 
   private final AnonymousLabelValidator anonymousLabelValidator = new AnonymousLabelValidator();
-
-  private static final Set<String> ZERO_ARG_INSTRUCTIONS =
-      Set.of(
-          "nop", "stop", "cache", "cmode", "color", "div2", "fmult", "lmult", "lob", "hib", "loop",
-          "lsr", "not", "plot", "ramb", "romb", "rol", "ror", "rpix", "sbk", "sex", "swap", "alt1",
-          "alt2", "alt3", "merge");
-
-  private static final Set<String> TWO_ARG_INSTRUCTIONS =
-      Set.of("iwt", "ibt", "move", "moves", "lm", "sm", "lms", "sms");
-
-  private static final Set<String> R1_TO_R15_ONLY_INSTRUCTIONS =
-      Set.of("and", "bic", "or", "xor", "mult", "umult");
-
-  private static final Set<String> IMM_0_TO_15_INSTRUCTIONS =
-      Set.of("add", "adc", "sub", "sbc", "and", "bic", "or", "xor", "mult", "umult");
-
-  private static final String LINK_INSTRUCTION = "link";
-
-  private static class Scope {
-    final Scope parent;
-    final Set<String> registerLabels = new HashSet<>();
-    final Map<String, String> precoloredRegisters = new HashMap<>();
-
-    Scope(Scope parent) {
-      this.parent = parent;
-    }
-
-    boolean isRegisterLabel(String name) {
-      if (name == null) {
-        return false;
-      }
-      if (registerLabels.contains(name.toLowerCase(Locale.ROOT))) {
-        return true;
-      }
-      return parent != null && parent.isRegisterLabel(name);
-    }
-
-    void addRegisterLabel(String name) {
-      if (name != null && !name.isBlank()) {
-        registerLabels.add(name.toLowerCase(Locale.ROOT));
-      }
-    }
-
-    void addPrecoloredRegister(String name, String reg) {
-      if (name != null && !name.isBlank() && reg != null && !reg.isBlank()) {
-        precoloredRegisters.put(name.toLowerCase(Locale.ROOT), reg.toLowerCase(Locale.ROOT));
-      }
-    }
-
-    String getPrecoloredRegister(String name) {
-      if (name == null) {
-        return null;
-      }
-      String reg = precoloredRegisters.get(name.toLowerCase(Locale.ROOT));
-      if (reg != null) {
-        return reg;
-      }
-      return parent != null ? parent.getPrecoloredRegister(name) : null;
-    }
-  }
 
   public List<SyntaxDiagnostic> validate(TokenizedFile file) {
     if (file == null) {
@@ -85,88 +40,20 @@ public class InstructionSyntaxValidator {
 
     List<SyntaxDiagnostic> diagnostics = new ArrayList<>();
     URI uri = file.uri();
+    ScopeTree tree = file.scopeTree();
 
     int totalLines = file.textLines();
-    Scope fileScope = new Scope(null);
-    Deque<Scope> scopeStack = new ArrayDeque<>();
-    scopeStack.push(fileScope);
-    Scope[] lineScopes = new Scope[totalLines];
-
-    // Pass 1: Build lexical scopes and collect register labels
-    for (int lineIdx = 0; lineIdx < totalLines; lineIdx++) {
-      Tokens lineTokens = file.getLine(lineIdx);
-      if (lineTokens == null || lineTokens.tokens().isEmpty()) {
-        lineScopes[lineIdx] = scopeStack.peek();
-        continue;
-      }
-
-      List<Token> tokens = lineTokens.tokens();
-      int startIdx = findStartIdx(tokens);
-      if (startIdx >= tokens.size()) {
-        lineScopes[lineIdx] = scopeStack.peek();
-        continue;
-      }
-
-      Token first = tokens.get(startIdx);
-      String firstText = first.text().toLowerCase(Locale.ROOT);
-
-      // Scope openers
-      if (first.type == TokenType.TOK_FUNCTION || "function".equals(firstText)) {
-        Scope fnScope = new Scope(scopeStack.peek());
-        scopeStack.push(fnScope);
-        collectFunctionRegisterLabels(tokens, startIdx, fnScope);
-      } else if (first.type == TokenType.TOK_PROC
-          || ".proc".equals(firstText)
-          || first.type == TokenType.TOK_SCOPE
-          || ".scope".equals(firstText)) {
-        Scope blockScope = new Scope(scopeStack.peek());
-        scopeStack.push(blockScope);
-      }
-
-      // Register declarations: register var1 [= rX], var2 [= rY]
-      if (first.type == TokenType.TOK_REGISTER_KEYWORD || "register".equals(firstText)) {
-        collectRegisterKeywordLabels(tokens, startIdx, scopeStack.peek());
-      }
-
-      lineScopes[lineIdx] = scopeStack.peek();
-
-      // Scope closers
-      if (first.type == TokenType.TOK_ENDFUNCTION
-          || "endfunction".equals(firstText)
-          || first.type == TokenType.TOK_ENDPROC
-          || ".endproc".equals(firstText)
-          || first.type == TokenType.TOK_ENDSCOPE
-          || ".endscope".equals(firstText)) {
-        if (scopeStack.size() > 1) {
-          scopeStack.pop();
-        }
-      }
-    }
-
-    // Pass 2: Tag register label tokens and validate instructions/statements
-    boolean inMacro = false;
     for (int lineIdx = 0; lineIdx < totalLines; lineIdx++) {
       Tokens lineTokens = file.getLine(lineIdx);
       if (lineTokens == null || lineTokens.tokens().isEmpty()) {
         continue;
       }
 
-      int lineNum = lineIdx + 1; // 1-based
+      int lineNum = lineIdx + 1;
       List<Token> tokens = lineTokens.tokens();
-      Scope scope = lineScopes[lineIdx];
 
-      // Tag tokens in active scope matching declared register labels
-      if (scope != null) {
-        for (Token token : tokens) {
-          if (scope.isRegisterLabel(token.text())) {
-            token.addAttribute(TokenAttribute.REGISTER_LABEL);
-          }
-        }
-      }
-
-      // 1. Check for scanner lexical errors in any token
+      // 1. Check for scanner lexical errors in any token (all dialects, including macros)
       for (Token token : tokens) {
-        // The .error directive is scanned as TOK_ERROR but is not a lexical error.
         if (token.type == TokenType.TOK_ERROR && !".error".equalsIgnoreCase(token.text())) {
           String msg =
               token.message != null && !token.message.isBlank()
@@ -178,51 +65,39 @@ public class InstructionSyntaxValidator {
         }
       }
 
-      // Identify leading label if present
+      // Skip unexpanded macro template bodies
+      if (tree.isMacroBodyLine(lineIdx)) {
+        continue;
+      }
+
       int startIdx = findStartIdx(tokens);
       if (startIdx >= tokens.size()) {
         continue;
       }
 
-      Token first = tokens.get(startIdx);
+      List<Token> tail = tokens.subList(startIdx, tokens.size());
+      Token first = tail.get(0);
       String firstText = first.text().toLowerCase(Locale.ROOT);
 
-      // Macro bodies contain parameters and .define names as operands, which are only
-      // meaningful after expansion, so skip operand/instruction validation inside them.
-      if (first.type == TokenType.TOK_MACRO
-          || ".macro".equals(firstText)
-          || ".mac".equals(firstText)) {
-        inMacro = true;
-        continue;
-      }
-      if (first.type == TokenType.TOK_ENDMACRO
-          || ".endmacro".equals(firstText)
-          || ".endmac".equals(firstText)) {
-        inMacro = false;
-        continue;
-      }
-      if (inMacro) {
+      // 2. High-level X-GSU DSL macro validation ([inline] function, call, return, endfunction,
+      // register)
+      if (FunctionSyntaxHelper.isFunction(tail)) {
+        validateFunctionDeclaration(tail, uri, lineNum, diagnostics);
         continue;
       }
 
-      // 2. High-level DSL macro validation (function, call, return, endfunction, register)
-      if (first.type == TokenType.TOK_FUNCTION || "function".equals(firstText)) {
-        validateFunctionDeclaration(tokens, startIdx, lineTokens.line(), uri, lineNum, diagnostics);
+      if (FunctionSyntaxHelper.isCall(tail)) {
+        validateCallStatement(tail, uri, lineNum, diagnostics);
         continue;
       }
 
-      if (first.type == TokenType.TOK_CALL || "call".equals(firstText)) {
-        validateCallStatement(tokens, startIdx, uri, lineNum, diagnostics);
+      if (FunctionSyntaxHelper.isReturn(tail)) {
+        validateReturnStatement(tail, uri, lineNum, diagnostics);
         continue;
       }
 
-      if (first.type == TokenType.TOK_RETURN || "return".equals(firstText)) {
-        validateReturnStatement(tokens, startIdx, uri, lineNum, diagnostics);
-        continue;
-      }
-
-      if (first.type == TokenType.TOK_ENDFUNCTION || "endfunction".equals(firstText)) {
-        validateEndFunctionStatement(tokens, startIdx, uri, lineNum, diagnostics);
+      if (FunctionSyntaxHelper.isEndFunction(tail)) {
+        validateEndFunctionStatement(tail, uri, lineNum, diagnostics);
         continue;
       }
 
@@ -231,14 +106,15 @@ public class InstructionSyntaxValidator {
         continue;
       }
 
-      // 3. SuperFX GSU Instruction arity & syntax
-      if (GSUInstruction.isInstruction(first)) {
+      // 3. SuperFX GSU Instruction arity & operand bounds (gated on SUPERFX dialect)
+      if (tree.dialectAtLine(lineIdx) == DialectProfile.SUPERFX
+          && SuperFxIsa.isMnemonic(firstText)) {
+        Scope scope = tree.scopeAtLine(lineIdx);
         validateGsuInstruction(tokens, startIdx, lineTokens, scope, uri, lineNum, diagnostics);
       }
     }
 
     diagnostics.addAll(anonymousLabelValidator.validate(file));
-
     return diagnostics;
   }
 
@@ -253,58 +129,16 @@ public class InstructionSyntaxValidator {
   }
 
   private int findStartIdx(List<Token> tokens) {
-    if (tokens.size() > 1
-        && (tokens.get(1).type == TokenType.TOK_COLON || tokens.get(0).text().endsWith(":"))) {
-      return (tokens.get(1).type == TokenType.TOK_COLON) ? 2 : 1;
+    if (tokens.get(0).type == TokenType.TOK_COLON) {
+      return 1;
+    }
+    if (tokens.size() > 1 && tokens.get(1).type == TokenType.TOK_COLON) {
+      return 2;
+    }
+    if (tokens.get(0).text().endsWith(":")) {
+      return 1;
     }
     return 0;
-  }
-
-  private void collectFunctionRegisterLabels(List<Token> tokens, int startIdx, Scope fnScope) {
-    List<Token> fnTokens = tokens.subList(startIdx, tokens.size());
-    var decl = FunctionSyntaxHelper.parseFunction(fnTokens);
-    for (Token param : decl.parameters()) {
-      if (!param.text().matches("^[rR]\\d+$")) {
-        fnScope.addRegisterLabel(param.text());
-        param.addAttribute(TokenAttribute.REGISTER_LABEL);
-      }
-    }
-    if (decl.returnVariable().isPresent()) {
-      Token ret = decl.returnVariable().get();
-      if (!ret.text().matches("^[rR]\\d+$")) {
-        fnScope.addRegisterLabel(ret.text());
-        ret.addAttribute(TokenAttribute.REGISTER_LABEL);
-      }
-    }
-  }
-
-  private void collectRegisterKeywordLabels(List<Token> tokens, int startIdx, Scope currentScope) {
-    int i = startIdx + 1;
-    while (i < tokens.size()) {
-      Token t = tokens.get(i);
-      if (isVariableIdentifier(t)) {
-        String varName = t.text();
-        currentScope.addRegisterLabel(varName);
-        t.addAttribute(TokenAttribute.REGISTER_LABEL);
-        i++;
-        if (i < tokens.size()) {
-          Token next = tokens.get(i);
-          if (next.type == TokenType.TOK_EQ
-              || next.type == TokenType.TOK_ASSIGN
-              || "=".equals(next.text())) {
-            i++;
-            if (i < tokens.size() && tokens.get(i).type != TokenType.TOK_COMMA) {
-              currentScope.addPrecoloredRegister(varName, tokens.get(i).text());
-            }
-            while (i < tokens.size() && tokens.get(i).type != TokenType.TOK_COMMA) {
-              i++;
-            }
-          }
-        }
-      } else {
-        i++;
-      }
-    }
   }
 
   private void validateRegisterDeclaration(
@@ -335,7 +169,7 @@ public class InstructionSyntaxValidator {
             if (next.type == TokenType.TOK_EQ
                 || next.type == TokenType.TOK_ASSIGN
                 || "=".equals(next.text())) {
-              i++; // Skip '='
+              i++;
               if (i >= tokens.size() || tokens.get(i).type == TokenType.TOK_COMMA) {
                 diagnostics.add(
                     SyntaxDiagnostic.error(
@@ -403,14 +237,19 @@ public class InstructionSyntaxValidator {
 
     Token opcodeToken = tokens.get(startIdx);
     String mnemonic = opcodeToken.text().toLowerCase(Locale.ROOT);
+    SuperFxIsa.OpcodeSpec spec = SuperFxIsa.lookup(mnemonic).orElse(null);
+    if (spec == null) {
+      return;
+    }
 
-    // Check R1..R15-only instructions (and, bic, or, xor, mult, umult) against r0
-    if (R1_TO_R15_ONLY_INSTRUCTIONS.contains(mnemonic) && startIdx + 1 < tokens.size()) {
+    int topLevelCommas = countTopLevelCommas(tokens, startIdx + 1);
+
+    // 1. Check R1..R15-only instructions (and, bic, or, xor, mult, umult) against r0
+    if (spec.minRegister() == 1 && startIdx + 1 < tokens.size() && topLevelCommas == 0) {
       Token firstArg = tokens.get(startIdx + 1);
       if (firstArg.type != TokenType.TOK_HASH) {
-        String argText = firstArg.text();
-        String precolored = scope != null ? scope.getPrecoloredRegister(argText) : null;
-        if ("r0".equalsIgnoreCase(argText) || "r0".equalsIgnoreCase(precolored)) {
+        OptionalInt regIdx = resolveEffectiveRegister(firstArg.text(), scope);
+        if (regIdx.isPresent() && regIdx.getAsInt() == 0) {
           diagnostics.add(
               SyntaxDiagnostic.error(
                   uri,
@@ -420,66 +259,172 @@ public class InstructionSyntaxValidator {
                   "INVALID_R0_OPERAND",
                   String.format(
                       "Instruction '%s' only accepts registers R1-R15 (found '%s'). In SuperFX hardware, '%s r0' is not a valid register encoding (e.g. 'and r0' encodes $70 = 'merge', which is unsupported on FX3).",
-                      opcodeToken.text(), argText, mnemonic)));
+                      opcodeToken.text(), firstArg.text(), mnemonic)));
           return;
         }
       }
     }
 
-    // Check immediate operand bounds for short-immediate GSU instructions and link
-    if (startIdx + 1 < tokens.size() && tokens.get(startIdx + 1).type == TokenType.TOK_HASH) {
-      if (IMM_0_TO_15_INSTRUCTIONS.contains(mnemonic) || LINK_INSTRUCTION.equals(mnemonic)) {
-        ParsedImmediate parsedImm = tryParseImmediateLiteral(tokens, startIdx, lineTokens);
-        if (parsedImm != null) {
-          int immStart = tokens.get(startIdx + 1).getStartIndex();
-          int immEnd = tokens.get(tokens.size() - 1).getEndIndex();
-          if (IMM_0_TO_15_INSTRUCTIONS.contains(mnemonic)) {
-            if (parsedImm.value < 0 || parsedImm.value > 15) {
+    // 2. Check precolored register range violations for inc/dec (R0..R14), indirect (R0..R11),
+    // jmp/ljmp (R8..R13)
+    if (spec.maxRegister() == 14 && startIdx + 1 < tokens.size() && topLevelCommas == 0) {
+      Token firstArg = tokens.get(startIdx + 1);
+      OptionalInt regIdx = resolveEffectiveRegister(firstArg.text(), scope);
+      if (regIdx.isPresent() && regIdx.getAsInt() > 14) {
+        diagnostics.add(
+            SyntaxDiagnostic.error(
+                uri,
+                lineNum,
+                firstArg.getStartIndex(),
+                firstArg.getEndIndex(),
+                "INVALID_OPERAND",
+                String.format(
+                    "Instruction '%s' only accepts registers R0-R14 (found '%s')",
+                    opcodeToken.text(), firstArg.text())));
+        return;
+      }
+    }
+
+    if (spec.category() == SuperFxIsa.Category.MEMORY_INDIRECT
+        && !spec.isZeroArg()
+        && tokens.size() == startIdx + 4
+        && tokens.get(startIdx + 1).type == TokenType.TOK_LPAREN
+        && tokens.get(startIdx + 3).type == TokenType.TOK_RPAREN) {
+      Token inner = tokens.get(startIdx + 2);
+      OptionalInt regIdx = resolveEffectiveRegister(inner.text(), scope);
+      if (regIdx.isPresent() && (regIdx.getAsInt() < 0 || regIdx.getAsInt() > 11)) {
+        diagnostics.add(
+            SyntaxDiagnostic.error(
+                uri,
+                lineNum,
+                tokens.get(startIdx + 1).getStartIndex(),
+                tokens.get(startIdx + 3).getEndIndex(),
+                "INVALID_OPERAND",
+                String.format(
+                    "Indirect memory operand for '%s' only accepts registers R0-R11 (found '%s')",
+                    opcodeToken.text(), inner.text())));
+        return;
+      }
+    }
+
+    if (("jmp".equals(mnemonic) || "ljmp".equals(mnemonic)) && startIdx + 1 < tokens.size()) {
+      Token targetTok =
+          (tokens.size() == startIdx + 4
+                  && tokens.get(startIdx + 1).type == TokenType.TOK_LPAREN
+                  && tokens.get(startIdx + 3).type == TokenType.TOK_RPAREN)
+              ? tokens.get(startIdx + 2)
+              : (tokens.size() == startIdx + 2 ? tokens.get(startIdx + 1) : null);
+      if (targetTok != null) {
+        OptionalInt regIdx = resolveEffectiveRegister(targetTok.text(), scope);
+        if (regIdx.isPresent() && (regIdx.getAsInt() < 8 || regIdx.getAsInt() > 13)) {
+          diagnostics.add(
+              SyntaxDiagnostic.error(
+                  uri,
+                  lineNum,
+                  tokens.get(startIdx + 1).getStartIndex(),
+                  tokens.get(tokens.size() - 1).getEndIndex(),
+                  "INVALID_OPERAND",
+                  String.format(
+                      "Instruction '%s' only accepts registers R8-R13 (found '%s')",
+                      opcodeToken.text(), targetTok.text())));
+          return;
+        }
+      }
+    }
+
+    // 3. Check immediate operand bounds
+    if (startIdx + 1 < tokens.size()
+        && tokens.get(startIdx + 1).type == TokenType.TOK_HASH
+        && topLevelCommas == 0) {
+      if (!spec.acceptsImmediate() && !"shl".equals(mnemonic)) {
+        diagnostics.add(
+            SyntaxDiagnostic.error(
+                uri,
+                lineNum,
+                tokens.get(startIdx + 1).getStartIndex(),
+                tokens.get(tokens.size() - 1).getEndIndex(),
+                "INVALID_OPERAND",
+                String.format(
+                    "Instruction '%s' does not accept an immediate operand; only register operands are supported",
+                    opcodeToken.text())));
+        return;
+      }
+      if (spec.acceptsImmediate() && spec.maxImmediate() <= 15) {
+        Optional<ImmediateLiteral> parsed =
+            ImmediateLiteral.parse(tokens, startIdx + 1, lineTokens.line());
+        if (parsed.isPresent() && parsed.get().isConstant()) {
+          ImmediateLiteral imm = parsed.get();
+          int val = imm.signedValue();
+          if ("link".equals(mnemonic)) {
+            if (val < 1 || val > 4) {
               diagnostics.add(
                   SyntaxDiagnostic.error(
                       uri,
                       lineNum,
-                      immStart,
-                      immEnd,
-                      "IMMEDIATE_OUT_OF_RANGE",
-                      String.format(
-                          "Immediate operand '#%s' for '%s' is out of 4-bit range (#0 to #15 / #$0 to #$F). Load larger constants into a register via 'ibt' or 'iwt' first.",
-                          parsedImm.rawText, opcodeToken.text())));
-              return;
-            }
-          } else if (LINK_INSTRUCTION.equals(mnemonic)) {
-            if (parsedImm.value < 1 || parsedImm.value > 4) {
-              diagnostics.add(
-                  SyntaxDiagnostic.error(
-                      uri,
-                      lineNum,
-                      immStart,
-                      immEnd,
+                      imm.startColumn(),
+                      imm.endColumn(),
                       "IMMEDIATE_OUT_OF_RANGE",
                       String.format(
                           "Immediate operand '#%s' for 'link' is out of range (#1 to #4).",
-                          parsedImm.rawText)));
+                          imm.rawText())));
               return;
             }
+          } else if (val < spec.minImmediate() || val > spec.maxImmediate()) {
+            diagnostics.add(
+                SyntaxDiagnostic.error(
+                    uri,
+                    lineNum,
+                    imm.startColumn(),
+                    imm.endColumn(),
+                    "IMMEDIATE_OUT_OF_RANGE",
+                    String.format(
+                        "Immediate operand '#%s' for '%s' is out of 4-bit range (#0 to #15 / #$0 to #$F). Load larger constants into a register via 'ibt' or 'iwt' first.",
+                        imm.rawText(), opcodeToken.text())));
+            return;
           }
         }
       }
     }
 
-    // Sub-tokens starting from the opcode
+    // Check 8-bit bounds on ibt Rn, #imm (values outside -128..255; -128..-1 unmasked is checked by
+    // SfxInvariantAuditor as IBT_NEGATIVE_IMMEDIATE)
+    if ("ibt".equals(mnemonic) && topLevelCommas == 1) {
+      int hashIdx = findHashAfterComma(tokens, startIdx + 1);
+      if (hashIdx >= 0) {
+        Optional<ImmediateLiteral> parsed =
+            ImmediateLiteral.parse(tokens, hashIdx, lineTokens.line());
+        if (parsed.isPresent() && parsed.get().isConstant() && !parsed.get().isByteMasked()) {
+          ImmediateLiteral imm = parsed.get();
+          if (imm.signedValue() > 255 || imm.signedValue() < -128) {
+            diagnostics.add(
+                SyntaxDiagnostic.error(
+                    uri,
+                    lineNum,
+                    imm.startColumn(),
+                    imm.endColumn(),
+                    "IMMEDIATE_OUT_OF_RANGE",
+                    String.format(
+                        "Immediate operand '#%s' for 'ibt' does not fit in 8 bits (-128 to 255). Use 'iwt' for 16-bit constants.",
+                        imm.rawText())));
+            return;
+          }
+        }
+      }
+    }
+
+    // 4. Grammar / pattern check via Instructions catalog (pure predicate, no token mutation)
     List<Token> subTokensList = tokens.subList(startIdx, tokens.size());
     Tokens subTokens = new Tokens(lineTokens.line(), subTokensList);
 
     boolean anyMatches =
         Arrays.stream(Instructions.values())
             .filter(i -> i.instruction.instruction.equalsIgnoreCase(mnemonic))
-            .anyMatch(i -> i.matches(subTokens));
+            .anyMatch(i -> i.matches(subTokens, scope != null ? scope::isRegisterLabel : null));
 
     if (anyMatches) {
       return;
     }
 
-    // Operand list (excluding commas)
     List<Token> operandTokens = new ArrayList<>();
     for (int i = startIdx + 1; i < tokens.size(); i++) {
       Token t = tokens.get(i);
@@ -488,7 +433,7 @@ public class InstructionSyntaxValidator {
       }
     }
 
-    if (ZERO_ARG_INSTRUCTIONS.contains(mnemonic)) {
+    if (spec.isZeroArg()) {
       if (!operandTokens.isEmpty()) {
         Token extra = operandTokens.get(0);
         diagnostics.add(
@@ -505,15 +450,7 @@ public class InstructionSyntaxValidator {
       return;
     }
 
-    if (TWO_ARG_INSTRUCTIONS.contains(mnemonic)) {
-      // Count logical arguments separated by commas
-      int commaCount = 0;
-      for (int i = startIdx + 1; i < tokens.size(); i++) {
-        if (tokens.get(i).type == TokenType.TOK_COMMA) {
-          commaCount++;
-        }
-      }
-
+    if (spec.minArgs() == 2) {
       if (operandTokens.isEmpty()) {
         diagnostics.add(
             SyntaxDiagnostic.error(
@@ -525,7 +462,7 @@ public class InstructionSyntaxValidator {
                 String.format(
                     "Instruction '%s' requires 2 operands (e.g. register, value/address), found none",
                     opcodeToken.text())));
-      } else if (commaCount == 0 && operandTokens.size() < 2) {
+      } else if (topLevelCommas == 0 && operandTokens.size() < 2) {
         Token last = operandTokens.get(operandTokens.size() - 1);
         diagnostics.add(
             SyntaxDiagnostic.error(
@@ -550,8 +487,6 @@ public class InstructionSyntaxValidator {
       return;
     }
 
-    // Single operand instructions (branches, jumps, arithmetic with register/immediate,
-    // to/from/with)
     if (operandTokens.isEmpty()) {
       diagnostics.add(
           SyntaxDiagnostic.error(
@@ -575,188 +510,113 @@ public class InstructionSyntaxValidator {
     }
   }
 
+  private static OptionalInt resolveEffectiveRegister(String text, Scope scope) {
+    OptionalInt direct = SuperFxIsa.parsePhysicalRegister(text);
+    if (direct.isPresent()) {
+      return direct;
+    }
+    if (scope != null) {
+      String precolored = scope.resolvePrecoloredRegister(text);
+      if (precolored != null) {
+        return SuperFxIsa.parsePhysicalRegister(precolored);
+      }
+    }
+    return OptionalInt.empty();
+  }
+
+  private static int countTopLevelCommas(List<Token> tokens, int fromIdx) {
+    int depth = 0;
+    int commas = 0;
+    for (int i = fromIdx; i < tokens.size(); i++) {
+      TokenType t = tokens.get(i).type;
+      if (t == TokenType.TOK_LPAREN) {
+        depth++;
+      } else if (t == TokenType.TOK_RPAREN) {
+        depth--;
+      } else if (t == TokenType.TOK_COMMA && depth <= 0) {
+        commas++;
+      }
+    }
+    return commas;
+  }
+
+  private static int findHashAfterComma(List<Token> tokens, int fromIdx) {
+    int depth = 0;
+    for (int i = fromIdx; i < tokens.size(); i++) {
+      TokenType t = tokens.get(i).type;
+      if (t == TokenType.TOK_LPAREN) {
+        depth++;
+      } else if (t == TokenType.TOK_RPAREN) {
+        depth--;
+      } else if (t == TokenType.TOK_COMMA && depth <= 0) {
+        return (i + 1 < tokens.size() && tokens.get(i + 1).type == TokenType.TOK_HASH) ? i + 1 : -1;
+      }
+    }
+    return -1;
+  }
+
   private void validateFunctionDeclaration(
-      List<Token> tokens,
-      int startIdx,
-      String rawLine,
-      URI uri,
-      int lineNum,
-      List<SyntaxDiagnostic> diagnostics) {
-
-    List<Token> fnTokens = tokens.subList(startIdx, tokens.size());
+      List<Token> fnTokens, URI uri, int lineNum, List<SyntaxDiagnostic> diagnostics) {
     var decl = FunctionSyntaxHelper.parseFunction(fnTokens);
-
     if (decl.hasErrors()) {
-      for (Token t : fnTokens) {
-        if (t.hasAttribute(TokenAttribute.ERROR)) {
-          diagnostics.add(
-              SyntaxDiagnostic.error(
-                  uri,
-                  lineNum,
-                  t.getStartIndex(),
-                  t.getEndIndex(),
-                  "FUNCTION_DECLARATION_ERROR",
-                  t.message != null ? t.message : "Invalid function declaration syntax"));
-        }
-      }
-    }
-  }
-
-  private void validateCallStatement(
-      List<Token> tokens, int startIdx, URI uri, int lineNum, List<SyntaxDiagnostic> diagnostics) {
-
-    List<Token> callTokens = tokens.subList(startIdx, tokens.size());
-    var call = FunctionSyntaxHelper.parseCall(callTokens);
-
-    if (call.hasErrors()) {
-      for (Token t : callTokens) {
-        if (t.hasAttribute(TokenAttribute.ERROR)) {
-          diagnostics.add(
-              SyntaxDiagnostic.error(
-                  uri,
-                  lineNum,
-                  t.getStartIndex(),
-                  t.getEndIndex(),
-                  "CALL_STATEMENT_ERROR",
-                  t.message != null ? t.message : "Invalid call statement syntax"));
-        }
-      }
-    }
-  }
-
-  private void validateReturnStatement(
-      List<Token> tokens, int startIdx, URI uri, int lineNum, List<SyntaxDiagnostic> diagnostics) {
-
-    List<Token> returnTokens = tokens.subList(startIdx, tokens.size());
-    var ret = FunctionSyntaxHelper.parseReturn(returnTokens);
-
-    if (ret.hasErrors()) {
-      for (Token t : returnTokens) {
-        if (t.hasAttribute(TokenAttribute.ERROR)) {
-          diagnostics.add(
-              SyntaxDiagnostic.error(
-                  uri,
-                  lineNum,
-                  t.getStartIndex(),
-                  t.getEndIndex(),
-                  "RETURN_STATEMENT_ERROR",
-                  t.message != null ? t.message : "Invalid return statement syntax"));
-        }
-      }
-    }
-  }
-
-  private void validateEndFunctionStatement(
-      List<Token> tokens, int startIdx, URI uri, int lineNum, List<SyntaxDiagnostic> diagnostics) {
-
-    List<Token> endTokens = tokens.subList(startIdx, tokens.size());
-    if (!FunctionSyntaxHelper.validateEndFunction(endTokens)) {
-      for (int i = 1; i < endTokens.size(); i++) {
-        Token t = endTokens.get(i);
+      for (Token t : decl.errorTokens()) {
         diagnostics.add(
             SyntaxDiagnostic.error(
                 uri,
                 lineNum,
                 t.getStartIndex(),
                 t.getEndIndex(),
-                "EXTRA_TOKENS",
-                "Unexpected token after endfunction: " + t.text()));
+                "FUNCTION_DECLARATION_ERROR",
+                t.message != null ? t.message : "Invalid function declaration syntax"));
       }
     }
   }
 
-  private record ParsedImmediate(int value, String rawText) {}
-
-  private ParsedImmediate tryParseImmediateLiteral(
-      List<Token> tokens, int startIdx, Tokens lineTokens) {
-    int afterHashIdx = startIdx + 2;
-    if (afterHashIdx >= tokens.size()) {
-      return null;
-    }
-
-    // Case 1: Simple single token after '#' (tokens.size() == startIdx + 3)
-    if (tokens.size() == startIdx + 3) {
-      Token litToken = tokens.get(afterHashIdx);
-      if (litToken.type == TokenType.TOK_INTCON) {
-        int val = litToken.intVal;
-        String raw = getRawText(lineTokens, litToken.getStartIndex(), litToken.getEndIndex());
-        if (raw.isEmpty()) {
-          raw = !litToken.text().isEmpty() ? litToken.text() : Integer.toString(val);
-        }
-        return new ParsedImmediate(val, raw);
-      }
-      return null;
-    }
-
-    // Case 2: Negative literal '#-n' (tokens.size() == startIdx + 4)
-    if (tokens.size() == startIdx + 4
-        && tokens.get(afterHashIdx).type == TokenType.TOK_MINUS
-        && tokens.get(afterHashIdx + 1).type == TokenType.TOK_INTCON) {
-      Token litToken = tokens.get(afterHashIdx + 1);
-      int val = -litToken.intVal;
-      int start = tokens.get(afterHashIdx).getStartIndex();
-      int end = litToken.getEndIndex();
-      String raw = getRawText(lineTokens, start, end);
-      if (raw.isEmpty()) {
-        raw =
-            "-"
-                + (!litToken.text().isEmpty()
-                    ? litToken.text()
-                    : Integer.toString(litToken.intVal));
-      }
-      return new ParsedImmediate(val, raw);
-    }
-
-    // Case 3: Hex literal with 0x prefix (tokenized as TOK_INTCON:0 followed by TOK_IDENT:xNN)
-    if (tokens.size() == startIdx + 4
-        && tokens.get(afterHashIdx).type == TokenType.TOK_INTCON
-        && "0".equals(tokens.get(afterHashIdx).text())
-        && tokens.get(afterHashIdx + 1).type == TokenType.TOK_IDENT
-        && tokens.get(afterHashIdx).getEndIndex() == tokens.get(afterHashIdx + 1).getStartIndex()) {
-      int start = tokens.get(afterHashIdx).getStartIndex();
-      int end = tokens.get(afterHashIdx + 1).getEndIndex();
-      String raw = getRawText(lineTokens, start, end);
-      if (raw.matches("(?i)^0x[0-9a-fA-F]+$")) {
-        try {
-          long parsed = Long.parseLong(raw.substring(2), 16);
-          if (parsed <= Integer.MAX_VALUE && parsed >= Integer.MIN_VALUE) {
-            return new ParsedImmediate((int) parsed, raw);
-          }
-        } catch (NumberFormatException ignored) {
-        }
+  private void validateCallStatement(
+      List<Token> callTokens, URI uri, int lineNum, List<SyntaxDiagnostic> diagnostics) {
+    var call = FunctionSyntaxHelper.parseCall(callTokens);
+    if (call.hasErrors()) {
+      for (Token t : call.errorTokens()) {
+        diagnostics.add(
+            SyntaxDiagnostic.error(
+                uri,
+                lineNum,
+                t.getStartIndex(),
+                t.getEndIndex(),
+                "CALL_STATEMENT_ERROR",
+                t.message != null ? t.message : "Invalid call statement syntax"));
       }
     }
-
-    // Case 4: Negative 0x hex literal '#-0xNN' (tokens.size() == startIdx + 5)
-    if (tokens.size() == startIdx + 5
-        && tokens.get(afterHashIdx).type == TokenType.TOK_MINUS
-        && tokens.get(afterHashIdx + 1).type == TokenType.TOK_INTCON
-        && "0".equals(tokens.get(afterHashIdx + 1).text())
-        && tokens.get(afterHashIdx + 2).type == TokenType.TOK_IDENT
-        && tokens.get(afterHashIdx + 1).getEndIndex()
-            == tokens.get(afterHashIdx + 2).getStartIndex()) {
-      int start = tokens.get(afterHashIdx).getStartIndex();
-      int end = tokens.get(afterHashIdx + 2).getEndIndex();
-      String raw = getRawText(lineTokens, start, end);
-      if (raw.matches("(?i)^-0x[0-9a-fA-F]+$")) {
-        try {
-          long parsed = Long.parseLong(raw.substring(3), 16);
-          return new ParsedImmediate((int) -parsed, raw);
-        } catch (NumberFormatException ignored) {
-        }
-      }
-    }
-
-    return null;
   }
 
-  private String getRawText(Tokens lineTokens, int startIndex, int endIndex) {
-    if (lineTokens != null && lineTokens.line() != null) {
-      String line = lineTokens.line();
-      if (startIndex >= 0 && endIndex <= line.length() && startIndex <= endIndex) {
-        return line.substring(startIndex, endIndex).trim();
+  private void validateReturnStatement(
+      List<Token> returnTokens, URI uri, int lineNum, List<SyntaxDiagnostic> diagnostics) {
+    var ret = FunctionSyntaxHelper.parseReturn(returnTokens);
+    if (ret.hasErrors()) {
+      for (Token t : ret.errorTokens()) {
+        diagnostics.add(
+            SyntaxDiagnostic.error(
+                uri,
+                lineNum,
+                t.getStartIndex(),
+                t.getEndIndex(),
+                "RETURN_STATEMENT_ERROR",
+                t.message != null ? t.message : "Invalid return statement syntax"));
       }
     }
-    return "";
+  }
+
+  private void validateEndFunctionStatement(
+      List<Token> endTokens, URI uri, int lineNum, List<SyntaxDiagnostic> diagnostics) {
+    for (Token t : FunctionSyntaxHelper.parseEndFunction(endTokens)) {
+      diagnostics.add(
+          SyntaxDiagnostic.error(
+              uri,
+              lineNum,
+              t.getStartIndex(),
+              t.getEndIndex(),
+              "EXTRA_TOKENS",
+              t.message != null ? t.message : ("Unexpected token after endfunction: " + t.text())));
+    }
   }
 }

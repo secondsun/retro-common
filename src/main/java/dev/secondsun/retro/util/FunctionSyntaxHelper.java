@@ -10,6 +10,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+/**
+ * Pure parser and syntax helper for X-GSU high-level {@code [inline] function}, {@code call},
+ * {@code return}, and {@code endfunction} statements. Never mutates input {@link Token} instances.
+ */
 public final class FunctionSyntaxHelper {
 
   private FunctionSyntaxHelper() {}
@@ -23,7 +27,24 @@ public final class FunctionSyntaxHelper {
       return false;
     }
     Token first = tokenList.get(0);
-    return first.type == TokenType.TOK_FUNCTION || "function".equalsIgnoreCase(first.text());
+    if (first.type == TokenType.TOK_FUNCTION || "function".equalsIgnoreCase(first.text())) {
+      return true;
+    }
+    return isInlineFunction(tokenList);
+  }
+
+  public static boolean isInlineFunction(Tokens tokens) {
+    return isInlineFunction(tokens != null ? tokens.tokens() : null);
+  }
+
+  public static boolean isInlineFunction(List<Token> tokenList) {
+    if (tokenList == null || tokenList.size() < 2) {
+      return false;
+    }
+    Token first = tokenList.get(0);
+    Token second = tokenList.get(1);
+    return "inline".equalsIgnoreCase(first.text())
+        && (second.type == TokenType.TOK_FUNCTION || "function".equalsIgnoreCase(second.text()));
   }
 
   public static boolean isEndFunction(Tokens tokens) {
@@ -35,15 +56,7 @@ public final class FunctionSyntaxHelper {
       return false;
     }
     Token first = tokenList.get(0);
-    if (first.type == TokenType.TOK_ENDFUNCTION || "endfunction".equalsIgnoreCase(first.text())) {
-      for (int i = 1; i < tokenList.size(); i++) {
-        Token extra = tokenList.get(i);
-        extra.addAttribute(TokenAttribute.ERROR);
-        extra.message = "Unexpected token after endfunction: " + extra.text();
-      }
-      return true;
-    }
-    return false;
+    return first.type == TokenType.TOK_ENDFUNCTION || "endfunction".equalsIgnoreCase(first.text());
   }
 
   public static boolean validateEndFunction(Tokens tokens) {
@@ -51,10 +64,25 @@ public final class FunctionSyntaxHelper {
   }
 
   public static boolean validateEndFunction(List<Token> tokenList) {
-    if (!isEndFunction(tokenList)) {
-      return false;
+    return isEndFunction(tokenList) && tokenList.size() == 1;
+  }
+
+  /** Returns immutable copies of any unexpected trailing tokens after {@code endfunction}. */
+  public static List<Token> parseEndFunction(Tokens tokens) {
+    return parseEndFunction(tokens != null ? tokens.tokens() : null);
+  }
+
+  /** Returns immutable copies of any unexpected trailing tokens after {@code endfunction}. */
+  public static List<Token> parseEndFunction(List<Token> tokenList) {
+    if (!isEndFunction(tokenList) || tokenList.size() <= 1) {
+      return List.of();
     }
-    return tokenList.size() == 1;
+    List<Token> errors = new ArrayList<>();
+    for (int i = 1; i < tokenList.size(); i++) {
+      Token extra = tokenList.get(i);
+      errors.add(extra.withError("Unexpected token after endfunction: " + extra.text()));
+    }
+    return List.copyOf(errors);
   }
 
   public static boolean isCall(Tokens tokens) {
@@ -87,28 +115,35 @@ public final class FunctionSyntaxHelper {
 
   public static FunctionDeclaration parseFunction(List<Token> tokenList) {
     if (tokenList == null || tokenList.isEmpty()) {
-      return new FunctionDeclaration(null, null, List.of(), Optional.empty(), true);
+      return new FunctionDeclaration(
+          null, null, List.of(), Optional.empty(), true, false, List.of());
     }
 
+    boolean isInline = isInlineFunction(tokenList);
+    int fnIdx = isInline ? 1 : 0;
+
     boolean hasErrors = false;
-    Token functionToken = tokenList.get(0);
+    List<Token> errorTokens = new ArrayList<>();
+    Token functionToken = tokenList.get(fnIdx);
     if (functionToken.type != TokenType.TOK_FUNCTION
         && !"function".equalsIgnoreCase(functionToken.text())) {
-      functionToken.addAttribute(TokenAttribute.ERROR);
-      functionToken.message = "Expected 'function' keyword";
+      functionToken = functionToken.withError("Expected 'function' keyword");
+      errorTokens.add(functionToken);
       hasErrors = true;
     }
 
-    if (tokenList.size() == 1) {
-      functionToken.addAttribute(TokenAttribute.ERROR);
-      functionToken.message = "Missing function name";
-      return new FunctionDeclaration(functionToken, null, List.of(), Optional.empty(), true);
+    if (tokenList.size() <= fnIdx + 1) {
+      functionToken = functionToken.withError("Missing function name");
+      errorTokens.add(functionToken);
+      return new FunctionDeclaration(
+          functionToken, null, List.of(), Optional.empty(), true, isInline, errorTokens);
     }
 
-    Token nameToken = tokenList.get(1);
+    Token nameToken = tokenList.get(fnIdx + 1);
     if (!isIdentifier(nameToken)) {
-      nameToken.addAttribute(TokenAttribute.ERROR);
-      nameToken.message = "Expected function name identifier, found: " + nameToken.text();
+      nameToken =
+          nameToken.withError("Expected function name identifier, found: " + nameToken.text());
+      errorTokens.add(nameToken);
       hasErrors = true;
     }
 
@@ -116,7 +151,7 @@ public final class FunctionSyntaxHelper {
     Set<String> seenParamNames = new HashSet<>();
     Optional<Token> returnVariable = Optional.empty();
 
-    int i = 2;
+    int i = fnIdx + 2;
     boolean afterComma = false;
     Token lastComma = null;
 
@@ -128,26 +163,27 @@ public final class FunctionSyntaxHelper {
 
       if (token.type == TokenType.TOK_COMMA) {
         if (parameters.isEmpty() || afterComma) {
-          token.addAttribute(TokenAttribute.ERROR);
-          token.message = "Unexpected comma";
+          Token errTok = token.withError("Unexpected comma");
+          errorTokens.add(errTok);
           hasErrors = true;
         }
         afterComma = true;
         lastComma = token;
       } else if (isIdentifier(token)) {
+        Token paramTok = token;
         if (!seenParamNames.add(token.text())) {
-          token.addAttribute(TokenAttribute.ERROR);
-          token.message = "Duplicate parameter name: " + token.text();
+          paramTok = token.withError("Duplicate parameter name: " + token.text());
+          errorTokens.add(paramTok);
           hasErrors = true;
         }
-        parameters.add(token);
+        parameters.add(paramTok);
         afterComma = false;
         lastComma = null;
       } else {
-        token.addAttribute(TokenAttribute.ERROR);
-        token.message = "Expected parameter identifier, found: " + token.text();
+        Token paramTok = token.withError("Expected parameter identifier, found: " + token.text());
+        errorTokens.add(paramTok);
         hasErrors = true;
-        parameters.add(token);
+        parameters.add(paramTok);
         afterComma = false;
         lastComma = null;
       }
@@ -155,11 +191,11 @@ public final class FunctionSyntaxHelper {
     }
 
     if (afterComma && lastComma != null) {
-      lastComma.addAttribute(TokenAttribute.ERROR);
-      lastComma.message =
+      String msg =
           (i < tokenList.size() && tokenList.get(i).type == TokenType.TOK_COLON)
               ? "Unexpected comma before ':'"
               : "Dangling comma in parameter list";
+      errorTokens.add(lastComma.withError(msg));
       hasErrors = true;
     }
 
@@ -167,33 +203,34 @@ public final class FunctionSyntaxHelper {
       Token colonToken = tokenList.get(i);
       i++;
       if (i >= tokenList.size()) {
-        colonToken.addAttribute(TokenAttribute.ERROR);
-        colonToken.message = "Missing return variable after ':'";
+        errorTokens.add(colonToken.withError("Missing return variable after ':'"));
         hasErrors = true;
       } else {
         Token retToken = tokenList.get(i);
         if (isValidVariableOrRegister(retToken)) {
           returnVariable = Optional.of(retToken);
         } else {
-          retToken.addAttribute(TokenAttribute.ERROR);
-          retToken.message =
-              "Expected identifier or register for return variable, found: " + retToken.text();
+          Token errRet =
+              retToken.withError(
+                  "Expected identifier or register for return variable, found: " + retToken.text());
+          errorTokens.add(errRet);
           hasErrors = true;
-          returnVariable = Optional.of(retToken);
+          returnVariable = Optional.of(errRet);
         }
         i++;
 
         while (i < tokenList.size()) {
           Token extra = tokenList.get(i);
-          extra.addAttribute(TokenAttribute.ERROR);
-          extra.message = "Unexpected token after return variable: " + extra.text();
+          errorTokens.add(
+              extra.withError("Unexpected token after return variable: " + extra.text()));
           hasErrors = true;
           i++;
         }
       }
     }
 
-    return new FunctionDeclaration(functionToken, nameToken, parameters, returnVariable, hasErrors);
+    return new FunctionDeclaration(
+        functionToken, nameToken, parameters, returnVariable, hasErrors, isInline, errorTokens);
   }
 
   public static CallStatement parseCall(Tokens tokens) {
@@ -202,27 +239,30 @@ public final class FunctionSyntaxHelper {
 
   public static CallStatement parseCall(List<Token> tokenList) {
     if (tokenList == null || tokenList.isEmpty()) {
-      return new CallStatement(null, null, List.of(), Optional.empty(), true);
+      return new CallStatement(null, null, List.of(), Optional.empty(), true, List.of());
     }
 
     boolean hasErrors = false;
+    List<Token> errorTokens = new ArrayList<>();
     Token callToken = tokenList.get(0);
     if (callToken.type != TokenType.TOK_CALL && !"call".equalsIgnoreCase(callToken.text())) {
-      callToken.addAttribute(TokenAttribute.ERROR);
-      callToken.message = "Expected 'call' keyword";
+      callToken = callToken.withError("Expected 'call' keyword");
+      errorTokens.add(callToken);
       hasErrors = true;
     }
 
     if (tokenList.size() == 1) {
-      callToken.addAttribute(TokenAttribute.ERROR);
-      callToken.message = "Missing function target name";
-      return new CallStatement(callToken, null, List.of(), Optional.empty(), true);
+      callToken = callToken.withError("Missing function target name");
+      errorTokens.add(callToken);
+      return new CallStatement(callToken, null, List.of(), Optional.empty(), true, errorTokens);
     }
 
     Token targetToken = tokenList.get(1);
     if (!isIdentifier(targetToken)) {
-      targetToken.addAttribute(TokenAttribute.ERROR);
-      targetToken.message = "Expected function target identifier, found: " + targetToken.text();
+      targetToken =
+          targetToken.withError(
+              "Expected function target identifier, found: " + targetToken.text());
+      errorTokens.add(targetToken);
       hasErrors = true;
     }
 
@@ -241,8 +281,7 @@ public final class FunctionSyntaxHelper {
 
       if (token.type == TokenType.TOK_COMMA) {
         if (arguments.isEmpty() || afterComma) {
-          token.addAttribute(TokenAttribute.ERROR);
-          token.message = "Unexpected comma";
+          errorTokens.add(token.withError("Unexpected comma"));
           hasErrors = true;
         }
         afterComma = true;
@@ -252,10 +291,10 @@ public final class FunctionSyntaxHelper {
         afterComma = false;
         lastComma = null;
       } else {
-        token.addAttribute(TokenAttribute.ERROR);
-        token.message = "Unexpected argument token: " + token.text();
+        Token errArg = token.withError("Unexpected argument token: " + token.text());
+        errorTokens.add(errArg);
         hasErrors = true;
-        arguments.add(token);
+        arguments.add(errArg);
         afterComma = false;
         lastComma = null;
       }
@@ -263,11 +302,11 @@ public final class FunctionSyntaxHelper {
     }
 
     if (afterComma && lastComma != null) {
-      lastComma.addAttribute(TokenAttribute.ERROR);
-      lastComma.message =
+      String msg =
           (i < tokenList.size() && tokenList.get(i).type == TokenType.TOK_COLON)
               ? "Unexpected comma before ':'"
               : "Dangling comma in argument list";
+      errorTokens.add(lastComma.withError(msg));
       hasErrors = true;
     }
 
@@ -275,34 +314,35 @@ public final class FunctionSyntaxHelper {
       Token colonToken = tokenList.get(i);
       i++;
       if (i >= tokenList.size()) {
-        colonToken.addAttribute(TokenAttribute.ERROR);
-        colonToken.message = "Missing destination variable after ':'";
+        errorTokens.add(colonToken.withError("Missing destination variable after ':'"));
         hasErrors = true;
       } else {
         Token destToken = tokenList.get(i);
         if (isValidVariableOrRegister(destToken)) {
           destinationVariable = Optional.of(destToken);
         } else {
-          destToken.addAttribute(TokenAttribute.ERROR);
-          destToken.message =
-              "Expected identifier or register for destination variable, found: "
-                  + destToken.text();
+          Token errDest =
+              destToken.withError(
+                  "Expected identifier or register for destination variable, found: "
+                      + destToken.text());
+          errorTokens.add(errDest);
           hasErrors = true;
-          destinationVariable = Optional.of(destToken);
+          destinationVariable = Optional.of(errDest);
         }
         i++;
 
         while (i < tokenList.size()) {
           Token extra = tokenList.get(i);
-          extra.addAttribute(TokenAttribute.ERROR);
-          extra.message = "Unexpected token after destination variable: " + extra.text();
+          errorTokens.add(
+              extra.withError("Unexpected token after destination variable: " + extra.text()));
           hasErrors = true;
           i++;
         }
       }
     }
 
-    return new CallStatement(callToken, targetToken, arguments, destinationVariable, hasErrors);
+    return new CallStatement(
+        callToken, targetToken, arguments, destinationVariable, hasErrors, errorTokens);
   }
 
   public static ReturnStatement parseReturn(Tokens tokens) {
@@ -311,15 +351,16 @@ public final class FunctionSyntaxHelper {
 
   public static ReturnStatement parseReturn(List<Token> tokenList) {
     if (tokenList == null || tokenList.isEmpty()) {
-      return new ReturnStatement(null, Optional.empty(), true);
+      return new ReturnStatement(null, Optional.empty(), true, List.of());
     }
 
     boolean hasErrors = false;
+    List<Token> errorTokens = new ArrayList<>();
     Token returnToken = tokenList.get(0);
     if (returnToken.type != TokenType.TOK_RETURN
         && !"return".equalsIgnoreCase(returnToken.text())) {
-      returnToken.addAttribute(TokenAttribute.ERROR);
-      returnToken.message = "Expected 'return' keyword";
+      returnToken = returnToken.withError("Expected 'return' keyword");
+      errorTokens.add(returnToken);
       hasErrors = true;
     }
 
@@ -330,21 +371,20 @@ public final class FunctionSyntaxHelper {
       if (isValidArgumentToken(firstArg)) {
         returnVariable = Optional.of(firstArg);
       } else {
-        firstArg.addAttribute(TokenAttribute.ERROR);
-        firstArg.message = "Invalid return value: " + firstArg.text();
+        Token errArg = firstArg.withError("Invalid return value: " + firstArg.text());
+        errorTokens.add(errArg);
         hasErrors = true;
-        returnVariable = Optional.of(firstArg);
+        returnVariable = Optional.of(errArg);
       }
 
       for (int i = 2; i < tokenList.size(); i++) {
         Token extra = tokenList.get(i);
-        extra.addAttribute(TokenAttribute.ERROR);
-        extra.message = "Unexpected token after return value: " + extra.text();
+        errorTokens.add(extra.withError("Unexpected token after return value: " + extra.text()));
         hasErrors = true;
       }
     }
 
-    return new ReturnStatement(returnToken, returnVariable, hasErrors);
+    return new ReturnStatement(returnToken, returnVariable, hasErrors, errorTokens);
   }
 
   private static boolean isIdentifier(Token token) {

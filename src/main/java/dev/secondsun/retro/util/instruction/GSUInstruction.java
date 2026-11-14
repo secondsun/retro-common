@@ -1,12 +1,11 @@
 package dev.secondsun.retro.util.instruction;
 
-import static dev.secondsun.retro.util.instruction.Instructions.instructionLookupTable;
-
 import dev.secondsun.retro.util.Token;
-import dev.secondsun.retro.util.TokenAttribute;
 import dev.secondsun.retro.util.TokenType;
+import dev.secondsun.retro.util.sfx.SuperFxIsa;
 import dev.secondsun.retro.util.vo.Tokens;
 import java.util.ArrayList;
+import java.util.function.Predicate;
 
 public class GSUInstruction {
 
@@ -16,14 +15,17 @@ public class GSUInstruction {
 
   public GSUInstruction(String instruction, String... argumentDefinitions) {
     this.instruction = instruction;
-    this.argumentMatchers = new ArrayList<ArgumentMatcher>();
-    for (int i = 0; i < argumentDefinitions.length; i++) {
-      var argument = argumentDefinitions[i];
+    this.argumentMatchers = new ArrayList<>();
+    for (String argument : argumentDefinitions) {
       argumentMatchers.add(ArgumentMatcher.create(argument));
     }
   }
 
   public boolean matches(Tokens tokenizedLine) {
+    return matches(tokenizedLine, null);
+  }
+
+  public boolean matches(Tokens tokenizedLine, Predicate<String> isRegisterLabel) {
     var listTokens = new ArrayList<>(tokenizedLine.tokens());
 
     if (listTokens.isEmpty()) {
@@ -40,8 +42,8 @@ public class GSUInstruction {
     var matches = true;
 
     for (ArgumentMatcher matcher : argumentMatchers) {
-      matches = matches && matcher.match(listTokens);
-      if (listTokens.size() > 0) {
+      matches = matches && matcher.match(listTokens, isRegisterLabel);
+      if (!listTokens.isEmpty()) {
         matches = matches && listTokens.remove(0).type == TokenType.TOK_COMMA;
       }
     }
@@ -50,13 +52,15 @@ public class GSUInstruction {
   }
 
   public static boolean isInstruction(Token firstToken) {
-    return instructionLookupTable.get(firstToken.text().trim().toUpperCase()) != null;
+    return firstToken != null && SuperFxIsa.isMnemonic(firstToken.text());
   }
 
+  /**
+   * Retained as a safe no-op for backward compatibility; {@link
+   * dev.secondsun.retro.util.CA65Scanner} populates {@code GSU_INSTRUCTION} directly during
+   * immutable token construction.
+   */
   public static void mark(Token firstToken) {
-    var instruction = instructionLookupTable.get(firstToken.text().trim().toUpperCase());
-    if (instruction != null) {
-      firstToken.addAttribute(TokenAttribute.GSU_INSTRUCTION);
-    }
+    // Immutable Token instances already carry GSU_INSTRUCTION when scanned.
   }
 }

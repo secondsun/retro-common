@@ -5,5 +5,6 @@ open module dev.secondsun.retro.util {
   exports dev.secondsun.retro.util;
   exports dev.secondsun.retro.util.diagnostic;
   exports dev.secondsun.retro.util.instruction;
+  exports dev.secondsun.retro.util.sfx;
   exports dev.secondsun.retro.util.vo;
 }

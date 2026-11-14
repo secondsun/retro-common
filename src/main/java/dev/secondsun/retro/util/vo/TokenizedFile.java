@@ -3,37 +3,71 @@ package dev.secondsun.retro.util.vo;
 import dev.secondsun.retro.util.Token;
 import dev.secondsun.retro.util.TokenType;
 import dev.secondsun.retro.util.diagnostic.SyntaxDiagnostic;
+import dev.secondsun.retro.util.diagnostic.SyntaxValidator;
 import java.net.URI;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BiConsumer;
 
+/**
+ * Immutable, thread-safe lexical representation of an assembly source file, with lazily memoized
+ * structural views ({@link ScopeTree}, {@link OccurrenceIndex}, and {@link SyntaxDiagnostic}s).
+ */
 public class TokenizedFile {
   public static final TokenizedFile EMPTY = new EmptyTokenizedFile();
-  private Map<Integer, Tokens> fileLines = new HashMap<>();
-  private Integer lineCount = 0;
-  public URI uri;
-  private List<String> rawLines = new ArrayList<>();
-  private final List<SyntaxDiagnostic> diagnostics = new ArrayList<>();
+
+  private final Map<Integer, Tokens> fileLines;
+  private final int lineCount;
+  public final URI uri;
+  private final List<String> rawLines;
+
+  private volatile ScopeTree cachedScopeTree;
+  private volatile OccurrenceIndex cachedOccurrenceIndex;
+  private volatile List<SyntaxDiagnostic> cachedDiagnostics;
+
+  protected TokenizedFile(
+      URI uri, List<String> rawLines, Map<Integer, Tokens> fileLines, int lineCount) {
+    this.uri = uri;
+    this.rawLines = rawLines != null ? List.copyOf(rawLines) : List.of();
+    if (fileLines == null || fileLines.isEmpty()) {
+      this.fileLines = Map.of();
+    } else {
+      this.fileLines = Collections.unmodifiableMap(new LinkedHashMap<>(fileLines));
+    }
+    this.lineCount = Math.max(0, lineCount);
+  }
+
+  public static TokenizedFile create(
+      URI uri, List<String> rawLines, Map<Integer, Tokens> fileLines, int lineCount) {
+    return new TokenizedFile(uri, rawLines, fileLines, lineCount);
+  }
+
+  public static TokenizedFile emptyWithUri(URI uri) {
+    return new TokenizedFile(uri, List.of(), Map.of(), 0);
+  }
+
+  /** Returns an immutable copy bound to {@code newUri} (or {@code this} if already equal). */
+  public TokenizedFile withUri(URI newUri) {
+    if (Objects.equals(this.uri, newUri)) {
+      return this;
+    }
+    return new TokenizedFile(newUri, this.rawLines, this.fileLines, this.lineCount);
+  }
 
   public boolean isEmpty() {
     return textLines() == 0 || (fileLines.isEmpty() && rawLines.isEmpty());
   }
 
   public int textLines() {
-    return Math.max(lineCount + 1, rawLines.size());
-  }
-
-  public void setRawLines(List<String> rawLines) {
-    this.rawLines = rawLines;
-    if (!rawLines.isEmpty() && rawLines.size() - 1 > lineCount) {
-      lineCount = rawLines.size() - 1;
+    if (fileLines.isEmpty() && rawLines.isEmpty()) {
+      return 0;
     }
+    return Math.max(lineCount + 1, rawLines.size());
   }
 
   public List<String> getRawLines() {
@@ -48,59 +82,91 @@ public class TokenizedFile {
     return thing != null ? thing.line() : "";
   }
 
-  public void addLine(String line, int index, List<Token> tokens) {
-    fileLines.put(index, new Tokens(line, tokens));
-    if (index > lineCount) {
-      lineCount = index;
-    }
-  }
-
   public String getLineText(int idx) {
     var thing = fileLines.get(idx);
-    if (thing == null) {
-      return "";
-    }
-    return fileLines.get(idx).line();
+    return thing != null ? thing.line() : "";
   }
 
   public List<Token> getLineTokens(int idx) {
     var thing = fileLines.get(idx);
-    if (thing == null) {
-      return List.of();
-    }
-    return fileLines.get(idx).tokens();
+    return thing != null ? thing.tokens() : List.of();
   }
 
   public URI uri() {
     return uri;
   }
 
-  public void forEach(BiConsumer<Integer, Tokens> object) {
-    fileLines.forEach(object);
+  public void forEach(BiConsumer<Integer, Tokens> consumer) {
+    fileLines.forEach(consumer);
   }
 
   public Tokens getLine(int idx) {
     return fileLines.get(idx);
   }
 
+  /** Returns the lazily constructed, memoized {@link ScopeTree} for this file. */
+  public ScopeTree scopeTree() {
+    ScopeTree tree = cachedScopeTree;
+    if (tree == null) {
+      synchronized (this) {
+        tree = cachedScopeTree;
+        if (tree == null) {
+          tree = ScopeTree.build(this);
+          cachedScopeTree = tree;
+        }
+      }
+    }
+    return tree;
+  }
+
+  /** Returns the lazily constructed, memoized {@link OccurrenceIndex} for this file. */
+  public OccurrenceIndex occurrenceIndex() {
+    OccurrenceIndex occ = cachedOccurrenceIndex;
+    if (occ == null) {
+      synchronized (this) {
+        occ = cachedOccurrenceIndex;
+        if (occ == null) {
+          occ = OccurrenceIndex.build(this);
+          cachedOccurrenceIndex = occ;
+        }
+      }
+    }
+    return occ;
+  }
+
+  /** Returns the lazily computed, memoized syntax diagnostics for this file. */
   public List<SyntaxDiagnostic> getDiagnostics() {
-    return Collections.unmodifiableList(diagnostics);
+    List<SyntaxDiagnostic> diags = cachedDiagnostics;
+    if (diags == null) {
+      synchronized (this) {
+        diags = cachedDiagnostics;
+        if (diags == null) {
+          diags = new SyntaxValidator().validate(this);
+          cachedDiagnostics = diags;
+        }
+      }
+    }
+    return diags;
+  }
+
+  public void setRawLines(List<String> rawLines) {
+    throw new UnsupportedOperationException("TokenizedFile is immutable");
+  }
+
+  public void addLine(String line, int index, List<Token> tokens) {
+    throw new UnsupportedOperationException("TokenizedFile is immutable");
   }
 
   public void addDiagnostic(SyntaxDiagnostic diagnostic) {
-    if (diagnostic != null) {
-      diagnostics.add(diagnostic);
-    }
+    throw new UnsupportedOperationException("TokenizedFile is immutable");
   }
 
   public void addDiagnostics(Collection<SyntaxDiagnostic> newDiagnostics) {
-    if (newDiagnostics != null) {
-      diagnostics.addAll(newDiagnostics);
-    }
+    throw new UnsupportedOperationException("TokenizedFile is immutable");
   }
 
   public void clearDiagnostics() {
-    diagnostics.clear();
+    throw new UnsupportedOperationException("TokenizedFile is immutable");
   }
 
   /**
@@ -143,7 +209,6 @@ public class TokenizedFile {
       return Optional.empty();
     }
 
-    // 1. Check if cursor is on or adjacent to a namespace delimiter "::"
     for (int i = 0; i < tokens.size(); i++) {
       Token t = tokens.get(i);
       if (t.getType() == TokenType.TOK_NAMESPACE) {
@@ -156,12 +221,10 @@ public class TokenizedFile {
       }
     }
 
-    // 2. Check if cursor is on an identifier or local identifier
     for (int i = 0; i < tokens.size(); i++) {
       Token t = tokens.get(i);
       if (t.getType() == TokenType.TOK_IDENT || t.getType() == TokenType.TOK_LOCAL_IDENT) {
         if (t.getStartIndex() <= col && col <= t.getEndIndex()) {
-          // If adjacent to a namespace token, reconstruct qualified symbol
           if ((i > 0 && tokens.get(i - 1).getType() == TokenType.TOK_NAMESPACE)
               || (i + 1 < tokens.size()
                   && tokens.get(i + 1).getType() == TokenType.TOK_NAMESPACE)) {
@@ -183,11 +246,9 @@ public class TokenizedFile {
 
   private boolean isCursorOnOrAdjacentToNamespace(List<Token> tokenList, int nsIndex, int column) {
     Token nsToken = tokenList.get(nsIndex);
-    // Directly on the namespace token or within 1 character of it
     if (column >= nsToken.getStartIndex() - 1 && column <= nsToken.getEndIndex() + 1) {
       return true;
     }
-    // On the contiguous token immediately after "::"
     if (nsIndex + 1 < tokenList.size()) {
       Token next = tokenList.get(nsIndex + 1);
       if (next.getStartIndex() == nsToken.getEndIndex()) {
@@ -196,7 +257,6 @@ public class TokenizedFile {
         }
       }
     }
-    // On the contiguous token immediately before "::"
     if (nsIndex > 0) {
       Token prev = tokenList.get(nsIndex - 1);
       if (prev.getEndIndex() == nsToken.getStartIndex()) {
@@ -212,7 +272,6 @@ public class TokenizedFile {
     int start = centerIndex;
     int end = centerIndex;
 
-    // Scan backwards from centerIndex
     while (start > 0) {
       Token curr = tokens.get(start);
       Token prev = tokens.get(start - 1);
@@ -236,7 +295,6 @@ public class TokenizedFile {
       }
     }
 
-    // Scan forwards from centerIndex
     while (end + 1 < tokens.size()) {
       Token curr = tokens.get(end);
       Token next = tokens.get(end + 1);
@@ -331,6 +389,10 @@ public class TokenizedFile {
   }
 
   private static final class EmptyTokenizedFile extends TokenizedFile {
+    EmptyTokenizedFile() {
+      super(null, List.of(), Map.of(), 0);
+    }
+
     @Override
     public boolean isEmpty() {
       return true;
@@ -342,53 +404,18 @@ public class TokenizedFile {
     }
 
     @Override
-    public List<String> getRawLines() {
+    public ScopeTree scopeTree() {
+      return ScopeTree.EMPTY;
+    }
+
+    @Override
+    public OccurrenceIndex occurrenceIndex() {
+      return OccurrenceIndex.EMPTY;
+    }
+
+    @Override
+    public List<SyntaxDiagnostic> getDiagnostics() {
       return List.of();
-    }
-
-    @Override
-    public String getRawLine(int idx) {
-      return "";
-    }
-
-    @Override
-    public String getLineText(int idx) {
-      return "";
-    }
-
-    @Override
-    public List<Token> getLineTokens(int idx) {
-      return List.of();
-    }
-
-    @Override
-    public Tokens getLine(int idx) {
-      return null;
-    }
-
-    @Override
-    public void addLine(String line, int index, List<Token> tokens) {
-      throw new UnsupportedOperationException("TokenizedFile.EMPTY is immutable");
-    }
-
-    @Override
-    public void setRawLines(List<String> rawLines) {
-      throw new UnsupportedOperationException("TokenizedFile.EMPTY is immutable");
-    }
-
-    @Override
-    public void addDiagnostic(SyntaxDiagnostic diagnostic) {
-      throw new UnsupportedOperationException("TokenizedFile.EMPTY is immutable");
-    }
-
-    @Override
-    public void addDiagnostics(Collection<SyntaxDiagnostic> newDiagnostics) {
-      throw new UnsupportedOperationException("TokenizedFile.EMPTY is immutable");
-    }
-
-    @Override
-    public void clearDiagnostics() {
-      throw new UnsupportedOperationException("TokenizedFile.EMPTY is immutable");
     }
   }
 }

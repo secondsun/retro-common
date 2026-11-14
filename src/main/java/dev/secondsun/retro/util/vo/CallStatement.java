@@ -9,10 +9,22 @@ public record CallStatement(
     Token targetToken,
     List<Token> arguments,
     Optional<Token> destinationVariable,
-    boolean hasErrors) {
+    boolean hasErrors,
+    List<Token> errorTokens) {
+
   public CallStatement {
     arguments = arguments != null ? List.copyOf(arguments) : List.of();
     destinationVariable = destinationVariable != null ? destinationVariable : Optional.empty();
+    errorTokens = errorTokens != null ? List.copyOf(errorTokens) : List.of();
+  }
+
+  public CallStatement(
+      Token callToken,
+      Token targetToken,
+      List<Token> arguments,
+      Optional<Token> destinationVariable,
+      boolean hasErrors) {
+    this(callToken, targetToken, arguments, destinationVariable, hasErrors, List.of());
   }
 
   public String targetName() {

@@ -183,6 +183,10 @@ public enum DotKeywords {
     this.type = type;
   }
 
+  public String text() {
+    return text;
+  }
+
   public static DotKeywords fromText(String text) {
     for (DotKeywords b : DotKeywords.values()) {
       if (b.text.equalsIgnoreCase(text)) {

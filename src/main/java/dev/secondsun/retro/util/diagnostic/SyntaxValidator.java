@@ -7,8 +7,8 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Unified syntax validator coordinating block-balancing, instruction arity, and duplicate symbol
- * checks.
+ * Pure, stateless syntax validator coordinating block-balancing, instruction arity, and duplicate
+ * symbol checks without mutating {@link TokenizedFile}.
  */
 public class SyntaxValidator {
 
@@ -32,7 +32,7 @@ public class SyntaxValidator {
   }
 
   /**
-   * Validates [file] and populates its internal diagnostic list.
+   * Validates {@code file} and returns an immutable sorted list of detected syntax diagnostics.
    *
    * @param file the tokenized source file
    * @return sorted, unmodifiable list of all detected diagnostics
@@ -50,9 +50,6 @@ public class SyntaxValidator {
     all.sort(
         Comparator.comparingInt(SyntaxDiagnostic::line)
             .thenComparingInt(SyntaxDiagnostic::columnStart));
-
-    file.clearDiagnostics();
-    file.addDiagnostics(all);
 
     return Collections.unmodifiableList(all);
   }

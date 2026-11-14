@@ -2,7 +2,10 @@ package dev.secondsun;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import dev.secondsun.retro.util.*;
+import dev.secondsun.retro.util.CA65Scanner;
+import dev.secondsun.retro.util.DefaultWorkspaceIndex;
+import dev.secondsun.retro.util.Util;
+import dev.secondsun.retro.util.WorkspaceSnapshot;
 import dev.secondsun.retro.util.vo.Location;
 import java.io.File;
 import java.io.IOException;
@@ -10,78 +13,46 @@ import java.net.URI;
 import org.junit.jupiter.api.Test;
 
 /**
- * This is a suite of tests that test 1) symbol identification 2) symbol lookup/referencing 3)
- * lexical scoping and 4) handling symbols becoming dirty
+ * Boundary tests verifying symbol identification, documentation extraction, lexical scoping,
+ * shadowing, and buffer refresh via {@link DefaultWorkspaceIndex} and {@link WorkspaceSnapshot}.
  */
 public class SymbolsTest {
 
-  /**
-   * A symbol is defined when it is the only element on a line and ends with a ":" There are also
-   * anonymous symbols.
-   *
-   * @throws Exception
-   */
   @Test
-  public void canIdentifySymbolDefinition() throws Exception {
-    var symbolService = new SymbolService();
-    var fileService = new FileService();
+  public void canIdentifySymbolDefinition() {
+    File dir = new File(getClass().getClassLoader().getResource("symbolTest").getFile());
+    var index = new DefaultWorkspaceIndex(dir.toPath());
+    URI symbolUri = dir.toPath().resolve("symbol.s").toUri();
+    var lines = index.resolveFile(symbolUri, null);
+    var snap = index.snapshot();
 
-    ClassLoader classLoader = getClass().getClassLoader();
-    // src/test/resources/workspace1
-    File file = new File(classLoader.getResource("symbolTest").getFile());
-    fileService.addSearchPath(file.toURI());
+    var location = snap.resolveLocation("labelDef");
+    assertEquals(new Location(lines.uri(), 0, 0, 8), location);
 
-    var lines = fileService.readLines(URI.create("./symbol.s"));
-    symbolService.extractDefinitions(lines);
-
-    var location = symbolService.getLocation("labelDef");
-    assertEquals(new Location(lines.uri, 0, 0, 8), location);
-
-    var bobLocation = symbolService.getLocation("bob");
-    assertEquals(new Location(lines.uri, 14, 0, 3), bobLocation);
+    var bobLocation = snap.resolveLocation("bob");
+    assertEquals(new Location(lines.uri(), 14, 0, 3), bobLocation);
   }
 
-  /**
-   * A symbol is defined when it is the only element on a line and ends with a ":" There are also
-   * anonymous symbols.
-   *
-   * @throws Exception
-   */
   @Test
-  public void canIdentifyStructDefinition() throws Exception {
-    var symbolService = new SymbolService();
-    var fileService = new FileService();
+  public void canIdentifyStructDefinition() {
+    File dir = new File(getClass().getClassLoader().getResource("symbolTest").getFile());
+    var index = new DefaultWorkspaceIndex(dir.toPath());
+    URI symbolUri = dir.toPath().resolve("symbol.s").toUri();
+    var lines = index.resolveFile(symbolUri, null);
 
-    ClassLoader classLoader = getClass().getClassLoader();
-    // src/test/resources/workspace1
-    File file = new File(classLoader.getResource("symbolTest").getFile());
-    fileService.addSearchPath(file.toURI());
-
-    var lines = fileService.readLines(URI.create("./symbol.s"));
-    symbolService.extractDefinitions(lines);
-
-    var location = symbolService.getLocation("camera");
-    assertEquals(new Location(lines.uri, 5, 0, 14), location);
+    var location = index.snapshot().resolveLocation("camera");
+    assertEquals(new Location(lines.uri(), 5, 0, 14), location);
   }
 
-  /**
-   * Does a label lookup work everywhere
-   *
-   * @throws Exception
-   */
   @Test
-  public void fullSystemLabelLink() throws Exception {
-    var symbolService = new SymbolService();
-    var fileService = new FileService();
-    var projectService = new ProjectService(fileService, symbolService);
+  public void fullSystemLabelLink() {
+    var index = new DefaultWorkspaceIndex();
+    index.includeDir(getHomebrewDirURI());
 
-    projectService.includeDir(getHomebrewDirURI());
+    var lines = index.getFileContents(getHomebrewDirURI().resolve("./tests/decode_rnc/Test.sgs"));
+    assertFalse(lines.isEmpty());
 
-    var lines =
-        projectService.getFileContents(getHomebrewDirURI().resolve("./tests/decode_rnc/Test.sgs"));
-    symbolService.extractDefinitions(lines);
-
-    var location = symbolService.getLocation("initialize_buffer");
+    var location = index.snapshot().resolveLocation("initialize_buffer");
     assertNotNull(location);
   }
 
@@ -106,53 +77,23 @@ public class SymbolsTest {
   }
 
   @Test
-  /**
-   * Keep disabled for debugging
-   *
-   * @throws IOException
-   */
-  public void printLines() throws Exception {
-    var fileService = new FileService();
-    var grammar = new CA65Scanner();
+  public void includeDocumentation() {
+    File dir = new File(getClass().getClassLoader().getResource("includeTest").getFile());
+    var index = new DefaultWorkspaceIndex(dir.toPath());
+    URI macrosUri = dir.toPath().resolve("macros.s").toUri();
+    index.resolveFile(macrosUri, null);
+    var snap = index.snapshot();
 
-    ClassLoader classLoader = getClass().getClassLoader();
-    // src/test/resources/workspace1
-    File file = new File(classLoader.getResource("symbolTest").getFile());
-    fileService.addSearchPath(file.toURI());
-
-    fileService
-        .readLines(URI.create("./symbol.s"))
-        .forEach(
-            (index, line) -> {
-              System.out.println(line);
-            });
-  }
-
-  @Test
-  public void includeDocumentation() throws Exception {
-    var symbolService = new SymbolService();
-    var fileService = new FileService();
-
-    ClassLoader classLoader = getClass().getClassLoader();
-    File file = new File(classLoader.getResource("includeTest").getFile());
-    fileService.addSearchPath(file.toURI());
-
-    var lines = fileService.readLines(URI.create("./macros.s"));
-    symbolService.extractDefinitions(lines);
-
-    assertTrue(symbolService.hasDocumentation("gsuRunning"));
+    assertTrue(snap.hasDocumentation("gsuRunning"));
     var expectedGsuRunningDoc =
         """
                 Is the GSU running
                 zflag = 1 -> Yes
                 zflag = 0 -> No
                 Clobbers the Accumulator""";
-    assertEquals(expectedGsuRunningDoc, symbolService.getDocumentation("gsuRunning"));
+    assertEquals(expectedGsuRunningDoc, snap.resolveDocumentation("gsuRunning"));
+    assertNull(snap.resolveDocumentation("gsuOff"));
 
-    // Macro without doc comments
-    assertNull(symbolService.getDocumentation("gsuOff"));
-
-    // Also verify function documentation from an assembly snippet
     var functionSnippet =
         """
                 ;Calculates LOOKAT_MATRIX from CAMERA
@@ -161,17 +102,16 @@ public class SymbolsTest {
                 function camera_lookAt
                     nop
                 """;
-    var snippetFile = new CA65Scanner().tokenize(functionSnippet);
-    var snippetSymbolService = new SymbolService();
-    snippetSymbolService.extractDefinitions(snippetFile);
-
-    assertTrue(snippetSymbolService.hasDocumentation("camera_lookAt"));
+    var snippetSnap = index.snapshotFor(null, functionSnippet);
+    assertTrue(snippetSnap.hasDocumentation("camera_lookAt"));
     var expectedFunctionDoc =
         """
                 Calculates LOOKAT_MATRIX from CAMERA
                 This operates on Static values and has no input/output
                 Clobbers : All""";
-    assertEquals(expectedFunctionDoc, snippetSymbolService.getDocumentation("camera_lookAt"));
+    assertEquals(expectedFunctionDoc, snippetSnap.resolveDocumentation("camera_lookAt"));
+    // Transient snippet must not leak into persistent index
+    assertFalse(index.snapshot().hasDocumentation("camera_lookAt"));
   }
 
   @Test
@@ -188,43 +128,28 @@ public class SymbolsTest {
                     bra loop
                 endfunction
                 """;
-    var file = new CA65Scanner().tokenize(program);
-    file.uri = URI.create("file:///test/funcs.s");
-    var symbolService = new SymbolService();
-    symbolService.extractDefinitions(file);
+    URI uri = URI.create("file:///test/funcs.s");
+    var snap = WorkspaceSnapshot.EMPTY.overlay(uri, program);
 
-    // foo starts at line 0, loop at line 1, bra at line 2, endfunction at line 3
-    // bar starts at line 5, loop at line 6, bra at line 7, endfunction at line 8
-
-    // Line 2 is inside foo: loop must resolve to foo's loop (line 1)
-    var fooLoop = symbolService.getLocation("loop", file.uri, 2);
+    var fooLoop = snap.resolveLocation("loop", uri, 2);
     assertNotNull(fooLoop);
     assertEquals(1, fooLoop.line());
 
-    // Line 7 is inside bar: loop must resolve to bar's loop (line 6)
-    var barLoop = symbolService.getLocation("loop", file.uri, 7);
+    var barLoop = snap.resolveLocation("loop", uri, 7);
     assertNotNull(barLoop);
     assertEquals(6, barLoop.line());
 
-    // Qualified resolution:
-    var qualFoo = symbolService.getLocation("foo::loop");
-    assertNotNull(qualFoo);
-    assertEquals(1, qualFoo.line());
+    assertEquals(1, snap.resolveLocation("foo::loop").line());
+    assertEquals(6, snap.resolveLocation("bar::loop").line());
 
-    var qualBar = symbolService.getLocation("bar::loop");
-    assertNotNull(qualBar);
-    assertEquals(6, qualBar.line());
-
-    // Multi-definition lookup:
-    var allLoops = symbolService.getLocations("loop");
+    var allLoops = snap.resolveLocations("loop");
     assertEquals(2, allLoops.size());
 
-    // Context-aware multi-definition lookup:
-    var fooContextLoops = symbolService.getLocations("loop", file.uri, 2);
+    var fooContextLoops = snap.resolveLocations("loop", uri, 2);
     assertEquals(1, fooContextLoops.size());
     assertEquals(1, fooContextLoops.get(0).line());
 
-    var barContextLoops = symbolService.getLocations("loop", file.uri, 7);
+    var barContextLoops = snap.resolveLocations("loop", uri, 7);
     assertEquals(1, barContextLoops.size());
     assertEquals(6, barContextLoops.get(0).line());
   }
@@ -243,34 +168,23 @@ public class SymbolsTest {
                     bra loop
                 endfunction
                 """;
-    var file = new CA65Scanner().tokenize(program);
-    file.uri = URI.create("file:///test/lsp_test.s");
-    var symbolService = new SymbolService();
-    symbolService.extractDefinitions(file);
+    URI uri = URI.create("file:///test/lsp_test.s");
+    var file = new CA65Scanner().tokenize(program, uri);
+    var snap = WorkspaceSnapshot.EMPTY.overlay(uri, program);
 
-    // Retro-LSP passes cursor Location or (uri, line)
-    var fooCursor = new Location(file.uri, 2, 8, 12);
-    var resolvedForFoo = symbolService.getLocation("loop", fooCursor);
-    assertNotNull(resolvedForFoo);
-    assertEquals(1, resolvedForFoo.line());
+    var fooCursor = new Location(uri, 2, 8, 12);
+    assertEquals(1, snap.resolveLocation("loop", fooCursor).line());
 
-    var barCursor = new Location(file.uri, 7, 8, 12);
-    var resolvedForBar = symbolService.getLocation("loop", barCursor);
-    assertNotNull(resolvedForBar);
-    assertEquals(6, resolvedForBar.line());
+    var barCursor = new Location(uri, 7, 8, 12);
+    assertEquals(6, snap.resolveLocation("loop", barCursor).line());
 
-    // Token-based lookup
-    var fooToken = file.getLineTokens(2).get(1); // loop token
+    var fooToken = file.getLineTokens(2).get(1);
     assertEquals("loop", fooToken.text());
-    var tokenResolvedFoo = symbolService.getLocation(fooToken, file);
-    assertNotNull(tokenResolvedFoo);
-    assertEquals(1, tokenResolvedFoo.line());
+    assertEquals(1, snap.resolveLocation(fooToken, file).line());
 
-    var barToken = file.getLineTokens(7).get(1); // loop token
+    var barToken = file.getLineTokens(7).get(1);
     assertEquals("loop", barToken.text());
-    var tokenResolvedBar = symbolService.getLocation(barToken, file);
-    assertNotNull(tokenResolvedBar);
-    assertEquals(6, tokenResolvedBar.line());
+    assertEquals(6, snap.resolveLocation(barToken, file).line());
   }
 
   @Test
@@ -284,31 +198,14 @@ public class SymbolsTest {
                     return result
                 endfunction
                 """;
-    var file = new CA65Scanner().tokenize(program);
-    file.uri = URI.create("file:///test/params.s");
-    var symbolService = new SymbolService();
-    symbolService.extractDefinitions(file);
+    URI uri = URI.create("file:///test/params.s");
+    var snap = WorkspaceSnapshot.EMPTY.overlay(uri, program);
 
-    // Function itself is in global scope
-    var fnLoc = symbolService.getLocation("add_vectors");
-    assertNotNull(fnLoc);
-    assertEquals(0, fnLoc.line());
-
-    // Inside function (line 1), parameters and return var resolve to definition line (0)
-    var v1Loc = symbolService.getLocation("v1", file.uri, 1);
-    assertNotNull(v1Loc);
-    assertEquals(0, v1Loc.line());
-
-    var v2Loc = symbolService.getLocation("v2", file.uri, 2);
-    assertNotNull(v2Loc);
-    assertEquals(0, v2Loc.line());
-
-    var resLoc = symbolService.getLocation("result", file.uri, 3);
-    assertNotNull(resLoc);
-    assertEquals(0, resLoc.line());
-
-    // Outside function (line 10), parameters are not in scope
-    assertNull(symbolService.getLocation("v1", file.uri, 10));
+    assertEquals(0, snap.resolveLocation("add_vectors").line());
+    assertEquals(0, snap.resolveLocation("v1", uri, 1).line());
+    assertEquals(0, snap.resolveLocation("v2", uri, 2).line());
+    assertEquals(0, snap.resolveLocation("result", uri, 3).line());
+    assertNull(snap.resolveLocation("v1", uri, 10));
   }
 
   @Test
@@ -328,22 +225,13 @@ public class SymbolsTest {
                     bra loop
                 endfunction
                 """;
-    var file = new CA65Scanner().tokenize(program);
-    file.uri = URI.create("file:///test/shadow.s");
-    var symbolService = new SymbolService();
-    symbolService.extractDefinitions(file);
+    URI uri = URI.create("file:///test/shadow.s");
+    var snap = WorkspaceSnapshot.EMPTY.overlay(uri, program);
 
-    // Outside functions: loop is global (line 0)
-    assertEquals(0, symbolService.getLocation("loop", file.uri, 0).line());
-
-    // Inside foo (line 5): loop resolves to local loop (line 4)
-    assertEquals(4, symbolService.getLocation("loop", file.uri, 5).line());
-
-    // Inside foo (line 6): ::loop explicitly resolves to global loop (line 0)
-    assertEquals(0, symbolService.getLocation("::loop", file.uri, 6).line());
-
-    // Inside bar (line 10): does not define loop, falls back to global loop (line 0)
-    assertEquals(0, symbolService.getLocation("loop", file.uri, 10).line());
+    assertEquals(0, snap.resolveLocation("loop", uri, 0).line());
+    assertEquals(4, snap.resolveLocation("loop", uri, 5).line());
+    assertEquals(0, snap.resolveLocation("::loop", uri, 6).line());
+    assertEquals(0, snap.resolveLocation("loop", uri, 10).line());
   }
 
   @Test
@@ -362,21 +250,17 @@ public class SymbolsTest {
                     bra loop
                 endfunction
                 """;
-    var file = new CA65Scanner().tokenize(program);
-    file.uri = URI.create("file:///test/docs.s");
-    var symbolService = new SymbolService();
-    symbolService.extractDefinitions(file);
+    URI uri = URI.create("file:///test/docs.s");
+    var snap = WorkspaceSnapshot.EMPTY.overlay(uri, program);
 
-    assertTrue(symbolService.hasDocumentation("loop", file.uri, 3));
-    assertEquals(
-        "Documentation for foo's loop", symbolService.getDocumentation("loop", file.uri, 3));
+    assertTrue(snap.hasDocumentation("loop", uri, 3));
+    assertEquals("Documentation for foo's loop", snap.resolveDocumentation("loop", uri, 3));
 
-    assertTrue(symbolService.hasDocumentation("loop", file.uri, 9));
-    assertEquals(
-        "Documentation for bar's loop", symbolService.getDocumentation("loop", file.uri, 9));
+    assertTrue(snap.hasDocumentation("loop", uri, 9));
+    assertEquals("Documentation for bar's loop", snap.resolveDocumentation("loop", uri, 9));
 
-    assertEquals("Documentation for foo's loop", symbolService.getDocumentation("foo::loop"));
-    assertEquals("Documentation for bar's loop", symbolService.getDocumentation("bar::loop"));
+    assertEquals("Documentation for foo's loop", snap.resolveDocumentation("foo::loop"));
+    assertEquals("Documentation for bar's loop", snap.resolveDocumentation("bar::loop"));
   }
 
   @Test
@@ -391,201 +275,86 @@ public class SymbolsTest {
                     rts
                 .endproc
                 """;
-    var file = new CA65Scanner().tokenize(program);
-    file.uri = URI.create("file:///test/proc.s");
-    var symbolService = new SymbolService();
-    symbolService.extractDefinitions(file);
+    URI uri = URI.create("file:///test/proc.s");
+    var snap = WorkspaceSnapshot.EMPTY.overlay(uri, program);
 
-    // Inside inner scope (line 3)
-    assertEquals(3, symbolService.getLocation("inner_sym", file.uri, 3).line());
-    assertEquals(1, symbolService.getLocation("local_sym", file.uri, 3).line());
-
-    // Inside my_proc outside inner scope (line 5)
-    assertEquals(1, symbolService.getLocation("local_sym", file.uri, 5).line());
-    assertEquals(3, symbolService.getLocation("inner::inner_sym", file.uri, 5).line());
-
-    // Outside my_proc
-    assertEquals(1, symbolService.getLocation("my_proc::local_sym").line());
-    assertEquals(3, symbolService.getLocation("my_proc::inner::inner_sym").line());
+    assertEquals(3, snap.resolveLocation("inner_sym", uri, 3).line());
+    assertEquals(1, snap.resolveLocation("local_sym", uri, 3).line());
+    assertEquals(1, snap.resolveLocation("local_sym", uri, 5).line());
+    assertEquals(3, snap.resolveLocation("inner::inner_sym", uri, 5).line());
+    assertEquals(1, snap.resolveLocation("my_proc::local_sym").line());
+    assertEquals(3, snap.resolveLocation("my_proc::inner::inner_sym").line());
   }
 
   @Test
   public void refreshingFileRemovesStaleDefinitions() {
     var uri = URI.create("file:///test/refresh.s");
-    var programV1 =
+    var index = new DefaultWorkspaceIndex();
+    index.openOrUpdateBuffer(
+        uri,
         """
                 function foo
                 old_label:
                     nop
                 endfunction
-                """;
-    var file1 = new CA65Scanner().tokenize(programV1);
-    file1.uri = uri;
-    var symbolService = new SymbolService();
-    symbolService.extractDefinitions(file1);
+                """);
 
-    assertNotNull(symbolService.getLocation("old_label", uri, 1));
+    assertNotNull(index.resolveLocation("old_label", uri, 1));
 
-    // Re-extracting with new code removes old_label
-    var programV2 =
+    index.openOrUpdateBuffer(
+        uri,
         """
                 function foo
                 new_label:
                     nop
                 endfunction
-                """;
-    var file2 = new CA65Scanner().tokenize(programV2);
-    file2.uri = uri;
-    symbolService.extractDefinitions(file2);
+                """);
 
-    assertNull(symbolService.getLocation("old_label", uri, 1));
-    assertNotNull(symbolService.getLocation("new_label", uri, 1));
+    assertNull(index.resolveLocation("old_label", uri, 1));
+    assertNotNull(index.resolveLocation("new_label", uri, 1));
   }
 
   @Test
-  public void globalRegisterVariables() {
-    var program =
-        """
-                register input
-                register output = r6
-                """;
-    var file = new CA65Scanner().tokenize(program);
-    file.uri = URI.create("file:///test/register_global.s");
-    var symbolService = new SymbolService();
-    symbolService.extractDefinitions(file);
+  public void globalAndScopedRegisterVariables() {
+    URI globalUri = URI.create("file:///test/register_global.s");
+    var globalSnap =
+        WorkspaceSnapshot.EMPTY.overlay(
+            globalUri,
+            """
+            register input
+            register output = r6
+            register varA = r1, varB = r2, varC
+            ; Temporary counter
+            REGISTER counter = r0
+            """);
 
-    var inputLoc = symbolService.getLocation("input");
-    assertNotNull(inputLoc);
-    assertEquals(new Location(file.uri, 0, 9, 14), inputLoc);
+    assertEquals(new Location(globalUri, 0, 9, 14), globalSnap.resolveLocation("input"));
+    assertEquals(new Location(globalUri, 1, 9, 15), globalSnap.resolveLocation("output"));
+    assertEquals(new Location(globalUri, 2, 9, 13), globalSnap.resolveLocation("varA"));
+    assertEquals(new Location(globalUri, 2, 20, 24), globalSnap.resolveLocation("varB"));
+    assertEquals(new Location(globalUri, 2, 31, 35), globalSnap.resolveLocation("varC"));
+    assertEquals("Temporary counter", globalSnap.resolveDocumentation("counter"));
 
-    var outputLoc = symbolService.getLocation("output");
-    assertNotNull(outputLoc);
-    assertEquals(new Location(file.uri, 1, 9, 15), outputLoc);
-  }
+    URI scopedUri = URI.create("file:///test/register_scopes.s");
+    var scopedSnap =
+        WorkspaceSnapshot.EMPTY.overlay(
+            scopedUri,
+            """
+            function calculate
+                register temp = r3
+                nop
+            endfunction
 
-  @Test
-  public void multipleRegisterDeclarationsPerLine() {
-    var program =
-        """
-                register varA = r1, varB = r2, varC
-                """;
-    var file = new CA65Scanner().tokenize(program);
-    file.uri = URI.create("file:///test/register_multiple.s");
-    var symbolService = new SymbolService();
-    symbolService.extractDefinitions(file);
+            inline function process
+                register temp = r4
+                nop
+            endfunction
+            """);
 
-    var varALoc = symbolService.getLocation("varA");
-    assertNotNull(varALoc);
-    assertEquals(new Location(file.uri, 0, 9, 13), varALoc);
-
-    var varBLoc = symbolService.getLocation("varB");
-    assertNotNull(varBLoc);
-    assertEquals(new Location(file.uri, 0, 20, 24), varBLoc);
-
-    var varCLoc = symbolService.getLocation("varC");
-    assertNotNull(varCLoc);
-    assertEquals(new Location(file.uri, 0, 31, 35), varCLoc);
-  }
-
-  @Test
-  public void registerVariablesInLexicalScopeAndQualifiedNames() {
-    var program =
-        """
-                function calculate
-                    register temp = r3
-                    nop
-                endfunction
-
-                function process
-                    register temp = r4
-                    nop
-                endfunction
-                """;
-    var file = new CA65Scanner().tokenize(program);
-    file.uri = URI.create("file:///test/register_scopes.s");
-    var symbolService = new SymbolService();
-    symbolService.extractDefinitions(file);
-
-    // Inside calculate (line 2)
-    var calcTemp = symbolService.getLocation("temp", file.uri, 2);
-    assertNotNull(calcTemp);
-    assertEquals(1, calcTemp.line());
-
-    // Inside process (line 7)
-    var procTemp = symbolService.getLocation("temp", file.uri, 7);
-    assertNotNull(procTemp);
-    assertEquals(6, procTemp.line());
-
-    // Qualified lookups
-    var qualifiedCalc = symbolService.getLocation("calculate::temp");
-    assertNotNull(qualifiedCalc);
-    assertEquals(1, qualifiedCalc.line());
-
-    var qualifiedProc = symbolService.getLocation("process::temp");
-    assertNotNull(qualifiedProc);
-    assertEquals(6, qualifiedProc.line());
-  }
-
-  @Test
-  public void registerDocumentationComments() {
-    var program =
-        """
-                ; Temporary counter
-                register counter = r0
-                """;
-    var file = new CA65Scanner().tokenize(program);
-    file.uri = URI.create("file:///test/register_doc.s");
-    var symbolService = new SymbolService();
-    symbolService.extractDefinitions(file);
-
-    assertTrue(symbolService.hasDocumentation("counter"));
-    assertEquals("Temporary counter", symbolService.getDocumentation("counter"));
-  }
-
-  @Test
-  public void registerCaseInsensitiveScanning() {
-    var program =
-        """
-                REGISTER foo = r1
-                Register bar = r2
-                """;
-    var file = new CA65Scanner().tokenize(program);
-    file.uri = URI.create("file:///test/register_case.s");
-    var symbolService = new SymbolService();
-    symbolService.extractDefinitions(file);
-
-    var fooLoc = symbolService.getLocation("foo");
-    assertNotNull(fooLoc);
-    assertEquals(0, fooLoc.line());
-
-    var barLoc = symbolService.getLocation("bar");
-    assertNotNull(barLoc);
-    assertEquals(1, barLoc.line());
-  }
-
-  private URI getTestFile(String string) {
-    try {
-      return new File(getClass().getClassLoader().getResource("includeTest/" + string).getFile())
-          .getCanonicalFile()
-          .toURI();
-    } catch (IOException e) {
-      throw new RuntimeException(e);
-    }
-  }
-
-  /**
-   * A symbol is defined when it is the only element on a line and ends with a ":" There are also
-   * anonymous symbols.
-   *
-   * @throws Exception
-   */
-  private URI getTestDirURI() {
-    File file = new File(getClass().getClassLoader().getResource("includeTest/test.sgs").getFile());
-    try {
-      return file.getParentFile().getCanonicalFile().toURI();
-    } catch (IOException e) {
-      throw new RuntimeException(e);
-    }
+    assertEquals(1, scopedSnap.resolveLocation("temp", scopedUri, 2).line());
+    assertEquals(6, scopedSnap.resolveLocation("temp", scopedUri, 7).line());
+    assertEquals(1, scopedSnap.resolveLocation("calculate::temp").line());
+    assertEquals(6, scopedSnap.resolveLocation("process::temp").line());
   }
 
   private URI getHomebrewDirURI() {
